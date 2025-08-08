@@ -1,0 +1,19 @@
+llama-index>=0.10.0
+# LLM providers
+llama-index-llms-ollama
+llama-index-llms-openai
+llama-index-llms-azure-openai
+llama-index-llms-anthropic
+# Embeddings
+llama-index-embeddings-huggingface
+llama-index-embeddings-openai
+sentence-transformers
+# Utils
+bs4
+typer
+pydantic>=2
+pydantic-settings>=2.1.0
+python-dateutil
+dateparser
+ics
+streamlit
