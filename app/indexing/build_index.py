@@ -1,8 +1,10 @@
+# app/indexing/build_index.py
 import os, glob, json
 from typing import List, Dict, Any, Optional
 from llama_index.core import VectorStoreIndex
 from llama_index.core.node_parser import SentenceSplitter
 from llama_index.core.schema import TextNode
+from datetime import datetime
 
 from app.config.settings import get_settings
 from app.llm.provider import configure_llm
@@ -42,6 +44,24 @@ def _resolve_latest_raw(explicit_path: Optional[str]) -> str:
     return latest
 
 
+def _normalize_sender(sender: str) -> str:
+    """Normalize sender field for better matching"""
+    if not sender:
+        return "unknown"
+    
+    # Extract just the name/org part, remove email addresses
+    sender = sender.lower()
+    
+    # Remove email parts like <email@domain.com>
+    import re
+    sender = re.sub(r'<[^>]+>', '', sender).strip()
+    
+    # Remove quotes
+    sender = sender.replace('"', '').replace("'", '')
+    
+    return sender.strip()
+
+
 def build_index(raw_path: Optional[str] = None, persist_dir: str = "data/index") -> VectorStoreIndex:
     settings = get_settings()
     configure_llm(settings)
@@ -51,26 +71,68 @@ def build_index(raw_path: Optional[str] = None, persist_dir: str = "data/index")
     print(f"[index] Using raw file: {raw_file}")
 
     emails = _load_raw_emails(raw_file)
+    print(f"[index] Processing {len(emails)} emails")
 
-    splitter = SentenceSplitter(chunk_size=800, chunk_overlap=100)
+    # Use smaller chunks for better precision
+    splitter = SentenceSplitter(chunk_size=512, chunk_overlap=50)
     nodes: List[TextNode] = []
-    for e in emails:
+    
+    # Track unique senders for debugging
+    unique_senders = set()
+    
+    for i, e in enumerate(emails):
         text = (e.get("body_text") or e.get("body") or "").strip()
         if not text:
             continue
+        
+        # Normalize sender for better matching
+        sender = e.get("from_") or e.get("from") or "unknown"
+        sender_normalized = _normalize_sender(sender)
+        unique_senders.add(sender_normalized)
+        
+        # Enhanced metadata with normalized fields
         meta = {
             "message_id": e.get("message_id"),
             "uid": e.get("uid"),
-            "subject": e.get("subject"),
-            "from": e.get("from_") or e.get("from"),
+            "subject": e.get("subject") or "No subject",
+            "from": sender,  # Keep original
+            "from_normalized": sender_normalized,  # Add normalized version
             "date": e.get("date"),
             "sent_at": e.get("sent_at"),
             "folder": e.get("folder"),
+            "email_index": i  # Track which email this came from
         }
-        for ch in splitter.split_text(text):
-            nodes.append(TextNode(text=ch, metadata=meta))
+        
+        # Create a more informative text representation
+        # Include metadata in the text for better semantic matching
+        enhanced_text = f"From: {sender}\nSubject: {e.get('subject', 'No subject')}\n\n{text}"
+        
+        # Split into chunks
+        chunks = splitter.split_text(enhanced_text)
+        
+        # If no chunks (very short email), create at least one node
+        if not chunks and text:
+            chunks = [enhanced_text]
+        
+        for chunk_idx, ch in enumerate(chunks):
+            node_meta = meta.copy()
+            node_meta["chunk_index"] = chunk_idx
+            node_meta["total_chunks"] = len(chunks)
+            nodes.append(TextNode(text=ch, metadata=node_meta))
+    
+    print(f"[index] Created {len(nodes)} nodes from {len(emails)} emails")
+    print(f"[index] Unique senders found: {len(unique_senders)}")
+    print(f"[index] Sample senders: {list(unique_senders)[:10]}")
 
     os.makedirs(persist_dir, exist_ok=True)
-    index = VectorStoreIndex(nodes)
+    
+    # Create index with explicit settings
+    index = VectorStoreIndex(
+        nodes,
+        show_progress=True,
+    )
+    
     index.storage_context.persist(persist_dir=persist_dir)
+    print(f"[index] Index saved to {persist_dir}")
+    
     return index
