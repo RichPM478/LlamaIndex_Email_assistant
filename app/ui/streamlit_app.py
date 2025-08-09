@@ -14,8 +14,8 @@ from app.intelligence.email_analyzer import email_analyzer
 from app.ui.theme_manager import theme_manager
 from app.security.auth import auth
 
-# Use unified query engine
-from app.qa.unified_query import optimized_ask as ask
+# Use intelligent query engine for enhanced search (Phase 3C)
+from app.qa.intelligent_query import intelligent_ask as ask
 
 # Page config
 st.set_page_config(
@@ -68,10 +68,33 @@ if st.session_state.last_sync:
                             if s.get('timestamp', '').startswith(datetime.now().strftime('%Y-%m-%d'))])
         st.metric("Searches Today", searches_today)
     with col4:
-        if st.button("🔄 Sync New Emails", help="Check for new emails"):
-            with st.spinner("Checking for new emails..."):
-                # In production, this would do incremental sync
-                st.success("✓ Email archive is up to date")
+        # Import sync engine
+        from app.sync.live_sync import get_sync_engine
+        sync_engine = get_sync_engine()
+        sync_stats = sync_engine.get_statistics()
+        
+        if sync_stats['is_running']:
+            st.success("🟢 Live Sync Active")
+        else:
+            if st.button("🔄 Quick Sync", help="Manually check for new emails"):
+                with st.spinner("Checking for new emails..."):
+                    try:
+                        if sync_engine.connect():
+                            new_emails = sync_engine.fetch_new_emails()
+                            if new_emails:
+                                results = sync_engine.process_new_emails(new_emails)
+                                if results['high_quality']:
+                                    sync_engine.update_index_incremental(results['high_quality'])
+                                st.success(f"✓ Synced {results['accepted']} new emails")
+                                st.session_state.email_count += results['accepted']
+                                st.session_state.last_sync = datetime.now().strftime('%Y-%m-%d %H:%M')
+                            else:
+                                st.info("✓ Email archive is up to date")
+                            sync_engine.imap_connection = None
+                        else:
+                            st.error("Failed to connect to email server")
+                    except Exception as e:
+                        st.error(f"Sync error: {e}")
 
 st.markdown("---")
 
@@ -82,17 +105,17 @@ with tab1:
     # Search interface
     st.markdown("### What would you like to know?")
     
-    # Suggested queries
+    # Smart suggested queries (Phase 3C)
     col1, col2, col3 = st.columns(3)
     with col1:
         if st.button("📅 This week's events", use_container_width=True):
-            st.session_state.search_query = "What events and important dates are coming up this week?"
+            st.session_state.search_query = "events and meetings this week"
     with col2:
-        if st.button("💰 Payment requests", use_container_width=True):
-            st.session_state.search_query = "What payments or money do I need to bring?"
+        if st.button("💰 Bills and payments", use_container_width=True):
+            st.session_state.search_query = "what do I need to pay this month?"
     with col3:
-        if st.button("📝 Action items", use_container_width=True):
-            st.session_state.search_query = "What are the action items I need to complete?"
+        if st.button("🚨 Urgent items", use_container_width=True):
+            st.session_state.search_query = "urgent and important emails from last week"
     
     # Search box
     search_query = st.text_input(
@@ -523,30 +546,124 @@ with tab3:
         col1, col2 = st.columns(2)
         
         with col1:
-            st.markdown("#### 🔄 Data Management")
+            st.markdown("#### 🔄 Email Synchronization")
             
-            # Show index statistics
+            # Import sync components
+            from app.sync.live_sync import get_sync_engine
+            from app.ui.sync_status import render_sync_status
+            
+            sync_engine = get_sync_engine()
+            sync_stats = sync_engine.get_statistics()
+            
+            # Sync status display
+            st.markdown("**📡 Live Sync Status:**")
+            
+            if sync_stats['is_running']:
+                st.success(f"🟢 Live sync is ACTIVE - {sync_stats['current_status']}")
+                st.write(f"- Connection: {sync_stats['connection_state']}")
+                st.write(f"- Emails processed: {sync_stats['emails_processed']}")
+                st.write(f"- Added to index: {sync_stats['emails_added']}")
+                st.write(f"- Filtered out: {sync_stats['emails_filtered']}")
+                if sync_stats['last_sync']:
+                    st.write(f"- Last sync: {sync_stats['last_sync']}")
+                
+                # Stop button
+                if st.button("⏹️ Stop Live Sync", use_container_width=True, type="secondary"):
+                    sync_engine.stop()
+                    st.info("Live sync stopped")
+                    st.rerun()
+            else:
+                st.info("🔴 Live sync is INACTIVE")
+                
+                # Start live sync button
+                if st.button("🚀 Activate Live Email Sync", use_container_width=True, type="primary"):
+                    with st.spinner("Starting live sync..."):
+                        if sync_engine.start():
+                            st.success("✅ Live sync activated! New emails will be automatically synced and filtered.")
+                            st.info(f"Quality threshold: {sync_engine.quality_threshold}/100")
+                            st.rerun()
+                        else:
+                            st.error("❌ Failed to start live sync. Check your email settings.")
+                            if sync_stats['errors']:
+                                st.error(f"Error: {sync_stats['errors'][-1]}")
+            
+            st.markdown("---")
+            
+            # Manual sync option
+            st.markdown("**🔄 Manual Sync:**")
+            
+            if st.button("📥 Manually Sync Latest Emails", use_container_width=True):
+                with st.spinner("Checking for new emails..."):
+                    try:
+                        # Connect if not connected
+                        if not sync_stats['is_running']:
+                            if not sync_engine.connect():
+                                st.error("❌ Failed to connect to email server")
+                                if sync_stats['errors']:
+                                    st.error(f"Error: {sync_stats['errors'][-1]}")
+                                st.stop()
+                        
+                        # Fetch new emails
+                        new_emails = sync_engine.fetch_new_emails()
+                        
+                        if new_emails:
+                            st.info(f"Found {len(new_emails)} new emails")
+                            
+                            # Process with quality filtering
+                            with st.spinner("Processing emails with quality filtering..."):
+                                results = sync_engine.process_new_emails(new_emails)
+                            
+                            # Update index
+                            if results['high_quality']:
+                                with st.spinner("Updating search index..."):
+                                    sync_engine.update_index_incremental(results['high_quality'])
+                            
+                            # Show results
+                            st.success(f"✅ Sync complete!")
+                            col_a, col_b, col_c = st.columns(3)
+                            with col_a:
+                                st.metric("Processed", results['processed'])
+                            with col_b:
+                                st.metric("Added", results['accepted'])
+                            with col_c:
+                                st.metric("Filtered", results['rejected'])
+                            
+                            # Update session state
+                            st.session_state.email_count += results['accepted']
+                            st.session_state.last_sync = datetime.now().strftime('%Y-%m-%d %H:%M')
+                            
+                            # Show sample of accepted emails
+                            if results['high_quality']:
+                                with st.expander(f"✅ {len(results['high_quality'])} high-quality emails added"):
+                                    for email in results['high_quality'][:5]:
+                                        st.write(f"• **{email['clean_subject'][:60]}** (from {email['clean_sender']})")
+                                        st.caption(f"  Quality: {email['quality_score']:.1f}/100")
+                            
+                            # Show rejected emails
+                            if results['low_quality']:
+                                with st.expander(f"❌ {len(results['low_quality'])} emails filtered out"):
+                                    for email in results['low_quality'][:5]:
+                                        st.write(f"• {email['subject'][:60]}")
+                                        st.caption(f"  Reason: {email['rejection_reason']}")
+                        else:
+                            st.info("📭 No new emails found")
+                        
+                        # Disconnect if we connected just for manual sync
+                        if not sync_stats['is_running']:
+                            sync_engine.imap_connection = None
+                            
+                    except Exception as e:
+                        st.error(f"❌ Error during manual sync: {e}")
+            
+            st.markdown("---")
+            
+            # Index statistics
+            st.markdown("**📊 Index Statistics:**")
             index_stats = incremental_indexer.get_index_stats()
-            st.write("**Current Index Status:**")
             st.write(f"- Last updated: {index_stats['last_update'] or 'Never'}")
             st.write(f"- Total emails indexed: {index_stats['total_emails_indexed']:,}")
             st.write(f"- Total search nodes: {index_stats['total_nodes']:,}")
             st.write(f"- Index exists: {'✅' if index_stats['index_exists'] else '❌'}")
-            
-            # Email fetching
-            if st.button("Fetch New Emails", use_container_width=True):
-                with st.spinner("🔄 Fetching latest emails..."):
-                    try:
-                        recs = fetch_emails(settings, limit=200)
-                        if recs:
-                            path = save_raw_emails(recs)
-                            st.success(f"✅ Fetched {len(recs)} new emails")
-                            st.session_state.email_count = len(recs)
-                            st.session_state.last_sync = datetime.now().strftime('%Y-%m-%d %H:%M')
-                        else:
-                            st.warning("No new emails found")
-                    except Exception as e:
-                        st.error(f"❌ Error fetching emails: {e}")
             
             # Incremental indexing
             if st.button("Update Search Index", use_container_width=True):
@@ -576,6 +693,51 @@ with tab3:
                             st.error(f"❌ Error rebuilding index: {e}")
         
         with col2:
+            st.markdown("#### ⚙️ Sync Configuration")
+            
+            # Quality settings for sync
+            st.markdown("**Quality Filtering:**")
+            
+            quality_threshold = st.slider(
+                "Minimum Quality Score",
+                min_value=0,
+                max_value=100,
+                value=int(sync_engine.quality_threshold),
+                help="Only sync emails with quality score above this threshold"
+            )
+            
+            if quality_threshold != sync_engine.quality_threshold:
+                sync_engine.quality_threshold = quality_threshold
+                st.info(f"Quality threshold updated to {quality_threshold}/100")
+            
+            max_marketing = st.slider(
+                "Maximum Marketing Score",
+                min_value=0,
+                max_value=100,
+                value=int(sync_engine.max_marketing_score),
+                help="Reject emails with marketing score above this"
+            )
+            
+            if max_marketing != sync_engine.max_marketing_score:
+                sync_engine.max_marketing_score = max_marketing
+                st.info(f"Max marketing score updated to {max_marketing}/100")
+            
+            # Sync interval
+            sync_interval = st.number_input(
+                "Check Interval (seconds)",
+                min_value=60,
+                max_value=3600,
+                value=sync_engine.sync_interval,
+                step=60,
+                help="How often to check for new emails when IDLE not supported"
+            )
+            
+            if sync_interval != sync_engine.sync_interval:
+                sync_engine.sync_interval = sync_interval
+                st.info(f"Check interval updated to {sync_interval}s")
+            
+            st.markdown("---")
+            
             st.markdown("#### 📧 Email Settings")
             st.text_input("IMAP Server", value=settings.imap_host, disabled=True)
             st.text_input("Email Account", value=settings.imap_user, disabled=True)

@@ -16,6 +16,24 @@ import re
 import time
 from enum import Enum
 
+def _sanitize_metadata_value(value):
+    """Sanitize metadata values to prevent UI issues"""
+    if not value:
+        return "Unknown"
+    
+    # Convert to string
+    value = str(value).strip()
+    
+    # Remove problematic characters that can break HTML/JS
+    value = re.sub(r'[<>"\'\&@#%\{\}\[\]\\]', '_', value)
+    value = re.sub(r'\s+', ' ', value)
+    
+    # Limit length
+    if len(value) > 200:
+        value = value[:197] + "..."
+    
+    return value if value else "Unknown"
+
 class QueryStrategy(Enum):
     """Query strategy options"""
     SIMPLE = "simple"           # Simple post-filtering approach
@@ -155,9 +173,13 @@ class EmailQueryEngine:
         # Build citations
         citations = []
         for node in source_nodes[:top_k]:
-            citation = dict(node.node.metadata)
+            citation = {}
+            # Sanitize all metadata fields
+            for key, value in node.node.metadata.items():
+                citation[key] = _sanitize_metadata_value(value)
+            
             citation['score'] = node.score if hasattr(node, 'score') else None
-            citation['snippet'] = node.node.text[:200] if hasattr(node.node, 'text') else ""
+            citation['snippet'] = _sanitize_metadata_value(node.node.text[:200] if hasattr(node.node, 'text') else "")
             citations.append(citation)
         
         return {
@@ -214,10 +236,10 @@ class EmailQueryEngine:
         citations = []
         for node in nodes:
             citation = {
-                'from': node.node.metadata.get('from', 'Unknown'),
-                'subject': node.node.metadata.get('subject', 'No subject'),
-                'date': node.node.metadata.get('date', ''),
-                'snippet': node.node.text[:200] if hasattr(node.node, 'text') else "",
+                'from': _sanitize_metadata_value(node.node.metadata.get('from', 'Unknown')),
+                'subject': _sanitize_metadata_value(node.node.metadata.get('subject', 'No subject')),
+                'date': _sanitize_metadata_value(node.node.metadata.get('date', '')),
+                'snippet': _sanitize_metadata_value(node.node.text[:200] if hasattr(node.node, 'text') else ""),
                 'score': node.score if hasattr(node, 'score') else None
             }
             citations.append(citation)
@@ -295,10 +317,10 @@ class EmailQueryEngine:
                 text = '\n'.join(lines[content_start:])
             
             citation = {
-                'from': meta.get('from', 'Unknown'),
-                'subject': meta.get('subject', 'No subject'),
-                'date': meta.get('date', ''),
-                'snippet': text[:300].strip(),  # Clean snippet
+                'from': _sanitize_metadata_value(meta.get('from', 'Unknown')),
+                'subject': _sanitize_metadata_value(meta.get('subject', 'No subject')),
+                'date': _sanitize_metadata_value(meta.get('date', '')),
+                'snippet': _sanitize_metadata_value(text[:300].strip()),  # Clean snippet
                 'score': node.score if hasattr(node, 'score') else None
             }
             citations.append(citation)

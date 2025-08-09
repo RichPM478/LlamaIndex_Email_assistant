@@ -4,7 +4,30 @@ Modern chat-style interface for email queries
 import streamlit as st
 from datetime import datetime
 import time
-from app.qa.unified_query import optimized_ask, get_cache_status
+import html
+import re
+from app.qa.intelligent_query import intelligent_ask
+from app.qa.lazy_query import get_cache_status
+
+def sanitize_html_content(text):
+    """Sanitize text content for safe HTML display"""
+    if not text:
+        return ""
+    
+    # Convert to string and handle None
+    text = str(text) if text is not None else ""
+    
+    # Remove or replace problematic characters
+    text = re.sub(r'[<>"\'\&]', '', text)  # Remove HTML-breaking chars
+    text = re.sub(r'[@#%\{\}\[\]\\]', '_', text)  # Replace problematic chars
+    text = re.sub(r'\s+', ' ', text)  # Normalize whitespace
+    text = text.strip()
+    
+    # Limit length to prevent UI issues
+    if len(text) > 500:
+        text = text[:497] + "..."
+    
+    return text
 
 # Configure page
 st.set_page_config(
@@ -119,14 +142,14 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
-# Quick actions
-st.markdown("### 💡 Quick Actions")
+# Quick actions with Phase 3C intelligence
+st.markdown("### 💡 Smart Actions")
 cols = st.columns(4)
 quick_queries = [
     "📅 What events are coming up?",
-    "💳 Show me bills and payments",
-    "📬 What's my latest email?",
-    "🔔 Any important notifications?"
+    "💳 What do I need to pay?",
+    "🚨 Any urgent emails?",
+    "📋 What tasks do I have?"
 ]
 
 for col, query in zip(cols, quick_queries):
@@ -149,27 +172,65 @@ with chat_container:
             st.markdown(f'<div class="user-message">{message["content"]}</div>', 
                        unsafe_allow_html=True)
         else:
-            # Assistant message
-            st.markdown(f'<div class="assistant-message">{message["content"]}</div>', 
+            # Assistant message - sanitize content
+            safe_content = sanitize_html_content(message["content"])
+            st.markdown(f'<div class="assistant-message">{safe_content}</div>', 
                        unsafe_allow_html=True)
+            
+            # Show query intelligence insights if available (Phase 3C)
+            if "intelligence" in message and message["intelligence"]:
+                intelligence = message["intelligence"]
+                
+                if intelligence.get('intent') != 'general' and intelligence.get('confidence', 0) > 0.3:
+                    with st.expander("🧠 Query Intelligence", expanded=False):
+                        intent = intelligence.get('intent', 'unknown').replace('_', ' ').title()
+                        confidence = intelligence.get('confidence', 0)
+                        
+                        st.markdown(f"**Intent:** {intent} ({confidence:.0%} confidence)")
+                        
+                        if intelligence.get('enhanced_query') != intelligence.get('original_query'):
+                            st.markdown(f"**Enhanced Query:** {intelligence.get('enhanced_query', '')}")
+                        
+                        if intelligence.get('extracted_entities'):
+                            entities = []
+                            for entity_type, values in intelligence.get('extracted_entities', {}).items():
+                                if values:
+                                    entities.append(f"**{entity_type.title()}:** {', '.join(map(str, values))}")
+                            if entities:
+                                st.markdown("**Detected Entities:**")
+                                for entity in entities:
+                                    st.markdown(f"  • {entity}")
+                        
+                        if intelligence.get('context'):
+                            st.markdown(f"**Context:** {intelligence.get('context', '')}")
+                        
+                        processing_time = intelligence.get('processing_time', 0)
+                        if processing_time > 0:
+                            st.markdown(f"**Processing Time:** {processing_time:.3f}s")
             
             # Show sources if available
             if "sources" in message:
                 with st.expander("📎 Sources", expanded=False):
                     for source in message["sources"]:
+                        # Sanitize all source data
+                        safe_from = sanitize_html_content(source.get('from', 'Unknown'))
+                        safe_subject = sanitize_html_content(source.get('subject', 'No subject'))
+                        safe_snippet = sanitize_html_content(source.get('snippet', ''))[:150]
+                        safe_date = sanitize_html_content(source.get('date', ''))
+                        
                         st.markdown(f"""
                         <div class="source-card">
                             <div style="font-weight: bold; color: #4b5563;">
-                                {source['from']}
+                                {safe_from}
                             </div>
                             <div style="color: #6b7280; font-size: 0.9em;">
-                                {source['subject']}
+                                {safe_subject}
                             </div>
                             <div style="margin-top: 8px; color: #374151; font-size: 0.85em;">
-                                {source['snippet'][:150]}...
+                                {safe_snippet}...
                             </div>
                             <div style="color: #9ca3af; font-size: 0.8em; margin-top: 4px;">
-                                {source.get('date', '')}
+                                {safe_date}
                             </div>
                         </div>
                         """, unsafe_allow_html=True)
@@ -179,18 +240,19 @@ if st.session_state.processing:
     with st.spinner("🔍 Searching through your emails..."):
         last_user_msg = st.session_state.messages[-1]["content"]
         
-        # Get response
+        # Get intelligent response (Phase 3C enhancement)
         start_time = time.time()
-        result = optimized_ask(last_user_msg, top_k=5)
+        result = intelligent_ask(last_user_msg, top_k=5, debug=False)
         response_time = time.time() - start_time
         
-        # Add assistant response
+        # Add assistant response with intelligence metadata
         assistant_msg = {
             "role": "assistant",
             "content": result["answer"],
             "sources": result.get("citations", []),
             "timestamp": datetime.now(),
-            "response_time": response_time
+            "response_time": response_time,
+            "intelligence": result.get("query_intelligence", {})
         }
         st.session_state.messages.append(assistant_msg)
         st.session_state.processing = False
@@ -249,6 +311,95 @@ with st.sidebar:
     if st.session_state.messages and "response_time" in st.session_state.messages[-1]:
         st.metric("Last Response Time", 
                  f"{st.session_state.messages[-1]['response_time']:.2f}s")
+    
+    # Email Sync Section
+    st.markdown("### 🔄 Email Sync")
+    
+    # Import sync engine
+    from app.sync.live_sync import get_sync_engine
+    sync_engine = get_sync_engine()
+    sync_stats = sync_engine.get_statistics()
+    
+    # Live Sync Status with auto-refresh
+    if sync_stats['is_running']:
+        st.success("🟢 Live Sync Active")
+        
+        # Show current status with emoji
+        status_text = sync_stats['current_status']
+        st.info(f"📡 {status_text}")
+        
+        # Show stats
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("Processed", sync_stats['emails_processed'])
+        with col2:
+            st.metric("Added", sync_stats['emails_added'])
+        with col3:
+            st.metric("Filtered", sync_stats['emails_filtered'])
+        
+        # Auto-refresh every 5 seconds when sync is running
+        st.markdown("*Auto-refreshing every 5 seconds...*")
+        time.sleep(5)
+        st.rerun()
+        
+        # Stop button
+        if st.button("⏹️ Stop Live Sync", use_container_width=True):
+            sync_engine.stop()
+            st.success("Live sync stopped")
+            st.rerun()
+    else:
+        st.info("🔴 Live Sync Inactive")
+        
+        # Start live sync
+        if st.button("🚀 Start Live Sync", use_container_width=True):
+            with st.spinner("Starting live sync..."):
+                if sync_engine.start():
+                    st.success("✅ Live sync started!")
+                    st.rerun()
+                else:
+                    st.error("❌ Failed to start sync")
+        
+        # Manual sync
+        if st.button("📥 Manual Sync", use_container_width=True):
+            with st.spinner("Syncing emails..."):
+                try:
+                    if sync_engine.connect():
+                        new_emails = sync_engine.fetch_new_emails()
+                        if new_emails:
+                            results = sync_engine.process_new_emails(new_emails)
+                            if results['high_quality']:
+                                sync_engine.update_index_incremental(results['high_quality'])
+                            st.success(f"✅ Synced {results['accepted']} emails")
+                            st.info(f"Filtered: {results['rejected']}")
+                        else:
+                            st.info("📭 No new emails")
+                        sync_engine.imap_connection = None
+                    else:
+                        st.error("Connection failed")
+                except Exception as e:
+                    st.error(f"Sync error: {str(e)[:50]}...")
+    
+    # Sync Configuration (collapsible)
+    with st.expander("⚙️ Sync Settings"):
+        quality_threshold = st.slider(
+            "Quality Threshold", 0, 100, 
+            int(sync_engine.quality_threshold),
+            help="Minimum quality to accept emails"
+        )
+        if quality_threshold != sync_engine.quality_threshold:
+            sync_engine.quality_threshold = quality_threshold
+            st.info(f"Quality updated to {quality_threshold}")
+        
+        max_marketing = st.slider(
+            "Max Marketing", 0, 100,
+            int(sync_engine.max_marketing_score),
+            help="Reject emails above this marketing score"  
+        )
+        if max_marketing != sync_engine.max_marketing_score:
+            sync_engine.max_marketing_score = max_marketing
+            st.info(f"Marketing limit updated to {max_marketing}")
+    
+    st.markdown("---")
     
     # Clear chat button
     if st.button("🗑️ Clear Chat", use_container_width=True):
