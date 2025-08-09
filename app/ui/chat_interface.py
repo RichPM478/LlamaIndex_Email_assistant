@@ -4,7 +4,7 @@ Modern chat-style interface for email queries
 import streamlit as st
 from datetime import datetime
 import time
-from app.qa.optimized_query import optimized_ask, get_cache_status
+from app.qa.unified_query import optimized_ask, get_cache_status
 
 # Configure page
 st.set_page_config(

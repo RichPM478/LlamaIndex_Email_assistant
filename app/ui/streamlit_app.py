@@ -5,25 +5,17 @@ if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
 import streamlit as st
-from datetime import datetime, timedelta
-import json
+from datetime import datetime
 import time
-from typing import List, Dict, Optional
 from app.config.settings import get_settings
 from app.ingest.imap_loader import fetch_emails, save_raw_emails
-from app.indexing.build_index import build_index
 from app.indexing.incremental_indexer import incremental_indexer
-from app.intelligence.email_analyzer import email_analyzer, EmailCategory, ImportanceLevel
+from app.intelligence.email_analyzer import email_analyzer
 from app.ui.theme_manager import theme_manager
 from app.security.auth import auth
 
-# Try to import the simple query first, fall back to regular
-try:
-    from app.qa.optimized_query import optimized_ask as ask
-    print("[DEBUG] Using simple_query module")
-except ImportError:
-    from app.qa.query_engine import ask
-    print("[DEBUG] Using standard query_engine")
+# Use unified query engine
+from app.qa.unified_query import optimized_ask as ask
 
 # Page config
 st.set_page_config(

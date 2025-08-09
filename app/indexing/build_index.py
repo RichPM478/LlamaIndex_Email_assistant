@@ -4,7 +4,7 @@ from typing import List, Dict, Any, Optional
 from llama_index.core import VectorStoreIndex
 from llama_index.core.node_parser import SentenceSplitter
 from llama_index.core.schema import TextNode
-from datetime import datetime
+# Removed unused import: datetime
 
 from app.config.settings import get_settings
 from app.llm.provider import configure_llm

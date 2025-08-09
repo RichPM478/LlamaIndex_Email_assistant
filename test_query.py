@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Test the optimized query system"""
 
-from app.qa.optimized_query import optimized_ask
+from app.qa.unified_query import optimized_ask
 import time
 
 def clean_text(text):
