@@ -7,10 +7,16 @@ if ROOT not in sys.path:
 import streamlit as st
 from datetime import datetime, timedelta
 import json
+import time
 from typing import List, Dict, Optional
 from app.config.settings import get_settings
 from app.ingest.imap_loader import fetch_emails, save_raw_emails
 from app.indexing.build_index import build_index
+from app.indexing.incremental_indexer import incremental_indexer
+from app.intelligence.email_analyzer import email_analyzer, EmailCategory, ImportanceLevel
+from app.ui.theme_manager import theme_manager
+from app.security.auth import auth
+
 # Try to import the simple query first, fall back to regular
 try:
     from app.qa.simple_query import simple_ask as ask
@@ -27,115 +33,11 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# Custom CSS for professional styling
-st.markdown("""
-<style>
-    /* Main container */
-    .main {
-        padding-top: 2rem;
-    }
-    
-    /* Headers */
-    h1 {
-        color: #1e3a5f;
-        font-weight: 600;
-        border-bottom: 3px solid #4a90e2;
-        padding-bottom: 10px;
-        margin-bottom: 30px;
-    }
-    
-    h2 {
-        color: #2c5282;
-        font-weight: 500;
-        margin-top: 2rem;
-    }
-    
-    h3 {
-        color: #2d3748;
-        font-size: 1.1rem;
-        font-weight: 600;
-    }
-    
-    /* Search box styling */
-    .stTextInput > div > div > input {
-        font-size: 16px;
-        padding: 12px;
-        border-radius: 10px;
-    }
-    
-    /* Buttons */
-    .stButton > button {
-        background-color: #4a90e2;
-        color: white;
-        border-radius: 8px;
-        padding: 0.5rem 2rem;
-        font-weight: 500;
-        border: none;
-        transition: all 0.3s;
-    }
-    
-    .stButton > button:hover {
-        background-color: #357abd;
-        transform: translateY(-2px);
-        box-shadow: 0 5px 10px rgba(0,0,0,0.2);
-    }
-    
-    /* Info boxes */
-    .info-box {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        color: white;
-        padding: 1.5rem;
-        border-radius: 10px;
-        margin: 1rem 0;
-    }
-    
-    /* Citation cards */
-    .citation-card {
-        background: #f7fafc;
-        border-left: 4px solid #4a90e2;
-        padding: 1rem;
-        margin: 1rem 0;
-        border-radius: 0 8px 8px 0;
-        transition: all 0.3s;
-    }
-    
-    .citation-card:hover {
-        background: #edf2f7;
-        transform: translateX(5px);
-    }
-    
-    /* Metrics */
-    .metric-card {
-        background: white;
-        padding: 1rem;
-        border-radius: 10px;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        text-align: center;
-    }
-    
-    /* Hide Streamlit branding */
-    #MainMenu {visibility: hidden;}
-    footer {visibility: hidden;}
-    
-    /* Tab styling */
-    .stTabs [data-baseweb="tab-list"] {
-        gap: 8px;
-    }
-    
-    .stTabs [data-baseweb="tab"] {
-        height: 50px;
-        padding-left: 20px;
-        padding-right: 20px;
-        background-color: #f7fafc;
-        border-radius: 10px 10px 0 0;
-    }
-    
-    .stTabs [data-baseweb="tab-list"] button[aria-selected="true"] {
-        background-color: #4a90e2;
-        color: white;
-    }
-</style>
-""", unsafe_allow_html=True)
+# Apply theme and get CSS
+st.markdown(theme_manager.get_css_theme(), unsafe_allow_html=True)
+
+# Apply keyboard shortcuts
+st.markdown(theme_manager.get_keyboard_shortcuts_js(), unsafe_allow_html=True)
 
 # Initialize session state
 if 'search_history' not in st.session_state:
@@ -149,11 +51,18 @@ if 'show_admin' not in st.session_state:
 
 settings = get_settings()
 
-# Header with logo placeholder
-col1, col2, col3 = st.columns([1, 3, 1])
+# Header with theme toggle and logo
+col1, col2, col3 = st.columns([1, 2, 1])
+with col1:
+    theme_manager.render_theme_toggle()
+
 with col2:
-    st.markdown("<h1 style='text-align: center;'>📧 Email Intelligence Assistant</h1>", unsafe_allow_html=True)
-    st.markdown("<p style='text-align: center; color: #718096; margin-top: -10px;'>Smart search and insights from your email archive</p>", unsafe_allow_html=True)
+    st.markdown("# 📧 Email Intelligence Assistant")
+    st.markdown("*Smart search and insights from your email archive*")
+
+with col3:
+    # Quick stats or notifications could go here
+    pass
 
 # Quick stats bar
 if st.session_state.last_sync:
@@ -217,66 +126,245 @@ with tab1:
     
     # Search results
     if search_button and search_query:
-        with st.spinner("Searching through your emails..."):
+        search_start_time = time.time()
+        
+        with st.spinner("🔍 Searching through your emails..."):
             result = ask(search_query)
             
-            # Save to history
-            st.session_state.search_history.append({
-                'query': search_query,
-                'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M'),
-                'results': len(result.get('citations', []))
-            })
-        
-        # Display answer in a nice card
-        st.markdown("### Answer")
-        
-        # Answer box with confidence indicator
-        confidence = result.get('confidence')
-        confidence_color = "#48bb78" if confidence and confidence > 0.7 else "#ed8936" if confidence and confidence > 0.4 else "#e53e3e"
-        
-        st.markdown(f"""
-        <div style="background: white; padding: 1.5rem; border-radius: 10px; 
-                    box-shadow: 0 2px 4px rgba(0,0,0,0.1); border-left: 4px solid {confidence_color};">
-            {result['answer']}
-        </div>
-        """, unsafe_allow_html=True)
-        
-        # Sources section
-        if result.get('citations'):
-            st.markdown("### 📎 Sources")
+        search_duration = time.time() - search_start_time
             
-            # Sort citations by relevance
+        # Save to history with enhanced metadata
+        st.session_state.search_history.append({
+            'query': search_query,
+            'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M'),
+            'results': len(result.get('citations', [])),
+            'duration': search_duration,
+            'confidence': result.get('confidence', 0)
+        })
+        
+        # Enhanced Answer Display
+        st.markdown("### 🎯 Answer")
+        
+        # Answer statistics
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.metric("Response Time", f"{search_duration:.2f}s")
+        with col2:
+            confidence = result.get('confidence', 0)
+            if confidence:
+                st.metric("Confidence", f"{confidence:.2%}")
+        with col3:
+            st.metric("Sources", len(result.get('citations', [])))
+        with col4:
+            filters_applied = "Yes" if result.get('metadata_filters_applied', False) else "No"
+            st.metric("Filters Used", filters_applied)
+        
+        # Answer box with enhanced styling
+        confidence_color = "#48bb78" if confidence and confidence > 0.7 else "#ed8936" if confidence and confidence > 0.4 else "#e53e3e"
+        confidence_label = "High" if confidence and confidence > 0.7 else "Medium" if confidence and confidence > 0.4 else "Low"
+        
+        # Use theme-aware styling
+        colors = theme_manager.get_theme_colors()
+        
+        answer_html = f"""
+        <div class="search-result" style="
+            background: {colors['card_bg']}; 
+            border-left: 4px solid {confidence_color};
+            padding: 1.5rem; 
+            border-radius: 10px; 
+            box-shadow: {colors['shadow']};
+            border: 1px solid {colors['border_color']};
+            margin: 1rem 0;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+                <div style="color: {colors['text_primary']};">
+                    <strong>AI Response</strong>
+                </div>
+                <div style="
+                    background: {confidence_color}; 
+                    color: white; 
+                    padding: 0.3rem 0.8rem; 
+                    border-radius: 15px; 
+                    font-size: 0.8rem;">
+                    {confidence_label} Confidence
+                </div>
+            </div>
+            <div style="color: {colors['text_primary']}; line-height: 1.6;">
+                {result['answer']}
+            </div>
+        </div>
+        """
+        st.markdown(answer_html, unsafe_allow_html=True)
+        
+        # Enhanced Sources section
+        if result.get('citations'):
+            st.markdown("### 📎 Email Sources")
+            
+            # Sort citations by relevance and add intelligence
             citations = sorted(result['citations'], key=lambda x: x.get('score', 0), reverse=True)
             
-            # Display top citations in cards
+            # Display citations with enhanced information
             for i, cite in enumerate(citations[:5], 1):
+                # Try to get additional intelligence for this email
+                email_insights = None
+                try:
+                    email_data = {
+                        'from': cite.get('from', ''),
+                        'subject': cite.get('subject', ''),
+                        'body': cite.get('snippet', ''),
+                        'date': cite.get('date', '')
+                    }
+                    email_insights = email_analyzer.analyze_email(email_data)
+                except Exception as e:
+                    pass
+                
                 with st.container():
-                    col1, col2 = st.columns([5, 1])
-                    with col1:
-                        # Sender and subject
-                        sender = cite.get('from', 'Unknown sender')
-                        subject = cite.get('subject', 'No subject')
-                        date = cite.get('date', 'Unknown date')
-                        score = cite.get('score', 0)
-                        
-                        # Relevance indicator
-                        relevance = "High" if score > 0.7 else "Medium" if score > 0.4 else "Low"
-                        relevance_emoji = "🟢" if score > 0.7 else "🟡" if score > 0.4 else "🔴"
-                        
-                        st.markdown(f"""
-                        **{relevance_emoji} {sender}**  
-                        📋 {subject}  
-                        📅 {date}
-                        """)
-                        
-                        # Snippet
-                        if cite.get('snippet'):
-                            st.markdown(f"_{cite['snippet'][:150]}..._")
+                    # Create enhanced citation card with clean data
+                    sender = cite.get('sender') or cite.get('from', 'Unknown sender')
+                    subject = cite.get('subject', 'No subject')
+                    date = cite.get('date', 'Unknown date')
+                    score = cite.get('score', 0)
                     
-                    with col2:
-                        st.markdown(f"**Relevance**  \n{relevance}")
+                    # Clean up sender display - remove email formatting artifacts
+                    if '<' in sender and '>' in sender:
+                        # Extract just the name part if it's in format "Name" <email>
+                        name_part = sender.split('<')[0].strip().strip('"\'')
+                        if name_part:
+                            sender = name_part
+                        else:
+                            # Use email username part
+                            email_part = sender[sender.find('<')+1:sender.find('>')]
+                            sender = email_part.split('@')[0] if '@' in email_part else sender
                     
-                    st.markdown("---")
+                    # Clean up date display
+                    if date and len(date) > 50:
+                        # Try to extract just date part from long date strings
+                        import re
+                        date_match = re.search(r'\d{1,2}\s+\w{3}\s+\d{4}', date)
+                        if date_match:
+                            date = date_match.group()
+                        else:
+                            date = date[:20] + "..."
+                    
+                    # Relevance and importance indicators
+                    relevance = "High" if score > 0.7 else "Medium" if score > 0.4 else "Low"
+                    relevance_emoji = "🟢" if score > 0.7 else "🟡" if score > 0.4 else "🔴"
+                    
+                    # Add importance and category badges
+                    badges = [f"Relevance: {relevance}"]
+                    
+                    if email_insights:
+                        importance_emoji = {
+                            'CRITICAL': '🔥',
+                            'HIGH': '⚠️',
+                            'MEDIUM': '📄',
+                            'LOW': '📝',
+                            'MINIMAL': '💭'
+                        }.get(email_insights.importance_level.name, '📄')
+                        
+                        badges.append(f"Importance: {importance_emoji} {email_insights.importance_level.name.title()}")
+                        
+                        if email_insights.categories:
+                            category_emojis = {
+                                'urgent': '🚨', 'meeting': '📅', 'payment': '💰',
+                                'task': '✅', 'social': '👥', 'work': '💼'
+                            }
+                            main_category = email_insights.categories[0].value
+                            category_emoji = category_emojis.get(main_category, '📋')
+                            badges.append(f"Type: {category_emoji} {main_category.title()}")
+                    
+                    # Create citation card HTML
+                    citation_html = f"""
+                    <div class="citation-card" style="
+                        background: {colors['accent_bg']}; 
+                        border-left: 4px solid {confidence_color};
+                        padding: 1rem; 
+                        margin: 1rem 0; 
+                        border-radius: 0 8px 8px 0;
+                        border: 1px solid {colors['border_color']};
+                        transition: all 0.3s ease;">
+                        
+                        <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 0.5rem;">
+                            <div>
+                                <div style="font-weight: 600; color: {colors['text_primary']}; margin-bottom: 0.3rem;">
+                                    {relevance_emoji} {sender}
+                                </div>
+                                <div style="color: {colors['text_secondary']}; font-size: 0.9rem;">
+                                    📋 {subject}
+                                </div>
+                                <div style="color: {colors['text_secondary']}; font-size: 0.8rem; margin-top: 0.2rem;">
+                                    📅 {date}
+                                </div>
+                            </div>
+                            <div style="text-align: right;">
+                                <div style="font-size: 0.8rem; color: {colors['text_secondary']};">
+                                    Score: {score:.3f}
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div style="margin: 0.8rem 0;">
+                    """
+                    
+                    # Add badges
+                    for badge in badges:
+                        citation_html += f"""
+                            <span style="
+                                background: {colors['secondary_bg']}; 
+                                color: {colors['text_secondary']}; 
+                                padding: 0.2rem 0.5rem; 
+                                border-radius: 10px; 
+                                font-size: 0.7rem; 
+                                margin-right: 0.5rem;">
+                                {badge}
+                            </span>
+                        """
+                    
+                    citation_html += "</div>"
+                    
+                    # Add snippet with cleaning
+                    if cite.get('snippet'):
+                        snippet = cite['snippet']
+                        
+                        # Clean up snippet - remove redundant "From:" lines and email headers
+                        lines = snippet.split('\n')
+                        clean_lines = []
+                        
+                        for line in lines:
+                            line = line.strip()
+                            # Skip lines that start with email headers
+                            if (line.startswith('From:') or 
+                                line.startswith('Subject:') or 
+                                line.startswith('Date:') or
+                                line.startswith('To:') or
+                                line.startswith('CC:') or
+                                '<' in line and '>' in line and '@' in line):  # Email addresses
+                                continue
+                            if line:
+                                clean_lines.append(line)
+                        
+                        snippet = ' '.join(clean_lines)
+                        
+                        # Truncate if too long
+                        if len(snippet) > 200:
+                            snippet = snippet[:200] + "..."
+                        
+                        if snippet.strip():  # Only show if there's actual content
+                            citation_html += f"""
+                                <div style="
+                                    color: {colors['text_secondary']}; 
+                                    font-style: italic; 
+                                    line-height: 1.4;
+                                    margin-top: 0.8rem;
+                                    padding: 0.5rem;
+                                    background: {colors['primary_bg']};
+                                    border-radius: 5px;">
+                                    "{snippet}"
+                                </div>
+                            """
+                    
+                    citation_html += "</div>"
+                    
+                    st.markdown(citation_html, unsafe_allow_html=True)
 
 with tab2:
     # Insights Dashboard
@@ -411,30 +499,89 @@ with tab2:
 with tab3:
     st.markdown("### ⚙️ Settings & Administration")
     
-    # Admin mode toggle
-    admin_password = st.text_input("Admin password", type="password")
-    if admin_password == "admin":  # In production, use proper auth
-        st.session_state.show_admin = True
+    # Theme preferences (always visible)
+    theme_manager.render_ui_preferences()
     
-    if st.session_state.show_admin:
-        st.success("✓ Admin mode enabled")
+    st.markdown("---")
+    
+    # Secure admin authentication
+    if not auth.is_admin_authenticated():
+        st.markdown("#### 🔐 Admin Authentication")
+        with st.form("admin_login"):
+            admin_password = st.text_input("Admin password", type="password", help="Enter your secure admin password")
+            login_button = st.form_submit_button("Login")
+            
+            if login_button and admin_password:
+                if auth.authenticate_admin(admin_password):
+                    st.success("✅ Admin access granted!")
+                    st.rerun()
+    else:
+        # Extend session on activity
+        auth.extend_session()
         
+        col1, col2 = st.columns([5, 1])
+        with col1:
+            st.success("✅ Admin mode enabled")
+        with col2:
+            if st.button("Logout", type="secondary"):
+                auth.logout_admin()
+                st.rerun()
+        
+        # Admin functionality
         col1, col2 = st.columns(2)
         
         with col1:
             st.markdown("#### 🔄 Data Management")
-            if st.button("Fetch Latest Emails", use_container_width=True):
-                with st.spinner("Fetching emails..."):
-                    recs = fetch_emails(settings, limit=200)
-                    path = save_raw_emails(recs)
-                    st.success(f"✓ Fetched {len(recs)} emails")
-                    st.session_state.email_count = len(recs)
-                    st.session_state.last_sync = datetime.now().strftime('%Y-%m-%d %H:%M')
             
-            if st.button("Rebuild Search Index", use_container_width=True):
-                with st.spinner("Rebuilding index..."):
-                    idx = build_index(None, "data/index")
-                    st.success("✓ Search index rebuilt")
+            # Show index statistics
+            index_stats = incremental_indexer.get_index_stats()
+            st.write("**Current Index Status:**")
+            st.write(f"- Last updated: {index_stats['last_update'] or 'Never'}")
+            st.write(f"- Total emails indexed: {index_stats['total_emails_indexed']:,}")
+            st.write(f"- Total search nodes: {index_stats['total_nodes']:,}")
+            st.write(f"- Index exists: {'✅' if index_stats['index_exists'] else '❌'}")
+            
+            # Email fetching
+            if st.button("Fetch New Emails", use_container_width=True):
+                with st.spinner("🔄 Fetching latest emails..."):
+                    try:
+                        recs = fetch_emails(settings, limit=200)
+                        if recs:
+                            path = save_raw_emails(recs)
+                            st.success(f"✅ Fetched {len(recs)} new emails")
+                            st.session_state.email_count = len(recs)
+                            st.session_state.last_sync = datetime.now().strftime('%Y-%m-%d %H:%M')
+                        else:
+                            st.warning("No new emails found")
+                    except Exception as e:
+                        st.error(f"❌ Error fetching emails: {e}")
+            
+            # Incremental indexing
+            if st.button("Update Search Index", use_container_width=True):
+                with st.spinner("🔄 Updating search index..."):
+                    try:
+                        idx = incremental_indexer.build_incremental_index()
+                        if idx:
+                            st.success("✅ Search index updated successfully!")
+                        else:
+                            st.info("ℹ️ Index is already up to date")
+                        
+                        # Refresh stats
+                        updated_stats = incremental_indexer.get_index_stats()
+                        st.write(f"**Updated stats:** {updated_stats['total_emails_indexed']:,} emails indexed")
+                        
+                    except Exception as e:
+                        st.error(f"❌ Error updating index: {e}")
+            
+            # Full rebuild option
+            if st.button("🔄 Rebuild Full Index", use_container_width=True, help="Rebuild the entire search index from scratch"):
+                if st.button("⚠️ Confirm Full Rebuild", type="secondary"):
+                    with st.spinner("🔄 Rebuilding entire search index..."):
+                        try:
+                            idx = incremental_indexer.rebuild_full_index()
+                            st.success("✅ Full index rebuild completed!")
+                        except Exception as e:
+                            st.error(f"❌ Error rebuilding index: {e}")
         
         with col2:
             st.markdown("#### 📧 Email Settings")
@@ -443,9 +590,32 @@ with tab3:
             st.text_input("Folder", value=settings.imap_folder, disabled=True)
             
             st.markdown("#### 🤖 AI Settings")
-            st.text_input("AI Model", value=f"{settings.llm_provider} ({settings.ollama_model})", disabled=True)
-    else:
-        st.info("Enter admin password to access settings")
+            st.text_input("LLM Provider", value=settings.llm_provider, disabled=True)
+            if settings.llm_provider == "ollama":
+                st.text_input("Model", value=settings.ollama_model, disabled=True)
+            st.text_input("Embeddings", value=settings.embeddings_provider, disabled=True)
+            
+            st.markdown("#### 🔒 Security Status")
+            
+            # Check security features
+            security_status = []
+            
+            # Check if data is encrypted
+            import glob
+            encrypted_files = glob.glob("data/raw/*.json.enc")
+            if encrypted_files:
+                security_status.append("✅ Email data encrypted")
+            else:
+                security_status.append("⚠️ Email data not encrypted")
+            
+            # Check SSL settings
+            if settings.imap_ssl:
+                security_status.append("✅ IMAP SSL enabled")
+            else:
+                security_status.append("❌ IMAP SSL disabled")
+            
+            for status in security_status:
+                st.write(status)
     
     # User preferences (always visible)
     st.markdown("#### 👤 User Preferences")

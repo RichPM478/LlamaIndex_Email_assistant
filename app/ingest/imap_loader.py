@@ -27,13 +27,67 @@ def safe_decode_header(header_value):
         return str(header_value) if header_value else ""
 
 def fetch_emails(settings, limit=200):
-    """Fetch emails from IMAP server with robust error handling"""
+    """Fetch emails from IMAP server with secure connection and error handling"""
+    from app.security.encryption import settings_manager
+    from app.security.sanitizer import sanitizer
+    
+    # Input validation
+    if not isinstance(limit, int) or limit < 1 or limit > 10000:
+        limit = 200  # Safe default
+    
+    # Get secure credentials
     try:
-        imap = imaplib.IMAP4_SSL(settings.imap_host, settings.imap_port)
-        imap.login(settings.imap_user, settings.imap_password)
-        imap.select(settings.imap_folder)
+        secure_password = settings_manager.get_secure_imap_password()
+        if not secure_password:
+            print("IMAP password not available or invalid")
+            return []
     except Exception as e:
-        print(f"Failed to connect to IMAP server: {e}")
+        print(f"Failed to get secure IMAP password: {e}")
+        return []
+    
+    # Validate IMAP settings
+    if not all([settings.imap_host, settings.imap_user]):
+        print("IMAP host or user not configured")
+        return []
+    
+    # Sanitize IMAP settings
+    try:
+        safe_host = sanitizer.sanitize_field_input(settings.imap_host, "IMAP host")
+        safe_user = sanitizer.sanitize_field_input(settings.imap_user, "IMAP user")
+        safe_folder = sanitizer.sanitize_field_input(settings.imap_folder, "IMAP folder")
+    except ValueError as e:
+        print(f"IMAP settings validation failed: {e}")
+        return []
+    
+    # Establish secure IMAP connection
+    try:
+        # Create SSL context with certificate verification
+        import ssl
+        ssl_context = ssl.create_default_context()
+        ssl_context.check_hostname = True
+        ssl_context.verify_mode = ssl.CERT_REQUIRED
+        
+        # Connect with SSL certificate validation
+        imap = imaplib.IMAP4_SSL(
+            safe_host, 
+            settings.imap_port,
+            ssl_context=ssl_context
+        )
+        
+        # Authenticate with secure password
+        imap.login(safe_user, secure_password)
+        imap.select(safe_folder)
+        
+        print(f"✅ Secure IMAP connection established to {safe_host}")
+        
+    except ssl.SSLError as e:
+        print(f"SSL certificate validation failed: {e}")
+        return []
+    except imaplib.IMAP4.error as e:
+        print(f"IMAP authentication failed: {e}")
+        return []
+    except Exception as e:
+        print(f"Failed to establish secure IMAP connection: {e}")
         return []
 
     # Search for all emails
@@ -58,65 +112,43 @@ def fetch_emails(settings, limit=200):
                 errors += 1
                 continue
             
-            # Parse email message
+            # Parse email message with clean parser
             msg = email.message_from_bytes(msg_data[0][1])
             
-            # Safely extract headers
-            from_ = safe_decode_header(msg.get("From"))
-            subject = safe_decode_header(msg.get("Subject"))
-            date = msg.get("Date", "")
-            message_id = msg.get("Message-ID", "")
+            # Use clean email parser
+            from app.ingest.email_parser import email_parser
+            parsed_email = email_parser.parse_email(msg)
             
-            # Apply filters if configured
+            # Apply filters using clean sender and subject
             if settings.filter_from:
-                if not any(f.lower() in from_.lower() for f in settings.filter_from):
+                if not any(f.lower() in parsed_email["sender"].lower() for f in settings.filter_from):
                     continue
             if settings.filter_subject:
-                if not any(f.lower() in subject.lower() for f in settings.filter_subject):
+                if not any(f.lower() in parsed_email["subject"].lower() for f in settings.filter_subject):
                     continue
             
-            # Extract body
-            body = ""
-            try:
-                if msg.is_multipart():
-                    for part in msg.walk():
-                        ctype = part.get_content_type()
-                        disp = str(part.get("Content-Disposition", ""))
-                        
-                        # Get text/plain parts
-                        if ctype == "text/plain" and "attachment" not in disp:
-                            try:
-                                charset = part.get_content_charset() or 'utf-8'
-                                payload = part.get_payload(decode=True)
-                                if payload:
-                                    body = payload.decode(charset, errors='ignore')
-                                    break
-                            except Exception as e:
-                                print(f"Error decoding body for email {i}: {e}")
-                                continue
-                else:
-                    # Single part message
-                    try:
-                        charset = msg.get_content_charset() or 'utf-8'
-                        payload = msg.get_payload(decode=True)
-                        if payload:
-                            body = payload.decode(charset, errors='ignore')
-                    except Exception as e:
-                        print(f"Error decoding body for email {i}: {e}")
-                        body = ""
-            except Exception as e:
-                print(f"Error extracting body for email {i}: {e}")
-                body = ""
+            # Create clean email record
+            email_record = {
+                "sender": parsed_email["sender"],
+                "subject": parsed_email["subject"],
+                "cc_recipients": parsed_email["cc_recipients"],
+                "body": parsed_email["body"],
+                "date": parsed_email["date"],
+                "message_id": parsed_email["message_id"],
+                "uid": str(mail_id),
+                # Keep original fields for backward compatibility
+                "from": parsed_email["from"],
+                "raw_subject": parsed_email["raw_subject"]
+            }
             
-            # Add to results
-            results.append({
-                "from": from_ or "Unknown",
-                "subject": subject or "No Subject",
-                "body": body,
-                "date": date,
-                "message_id": message_id,
-                "uid": str(mail_id)
-            })
+            # Sanitize email data before adding to results
+            try:
+                safe_record = sanitizer.sanitize_email_content(email_record)
+                results.append(safe_record)
+            except Exception as e:
+                print(f"Email sanitization failed for UID {mail_id}: {e}")
+                errors += 1
+                continue
             
             # Progress indicator
             if (i + 1) % 50 == 0:
@@ -139,20 +171,67 @@ def fetch_emails(settings, limit=200):
 
 
 def save_raw_emails(records):
-    """Save email records to JSON file"""
+    """Save email records to encrypted JSON file with security measures"""
+    from app.security.encryption import credential_manager
+    from app.security.sanitizer import sanitizer
+    
     if not records:
         print("No emails to save")
         return None
     
-    os.makedirs("data/raw", exist_ok=True)
-    path = os.path.join("data/raw", f"emails_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json")
+    # Input validation
+    if not isinstance(records, list) or len(records) > 50000:
+        print("Invalid or too many email records")
+        return None
     
-    import json
+    # Create secure data directory with proper permissions
+    data_dir = "data/raw"
+    os.makedirs(data_dir, mode=0o700, exist_ok=True)  # Only owner can access
+    
+    # Generate secure filename
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    filename = f"emails_{timestamp}.json.enc"
+    path = os.path.join(data_dir, filename)
+    
     try:
+        # Validate and sanitize all records
+        sanitized_records = []
+        for i, record in enumerate(records):
+            try:
+                if sanitizer.validate_json_structure(record):
+                    sanitized_record = sanitizer.sanitize_email_content(record)
+                    sanitized_records.append(sanitized_record)
+                else:
+                    print(f"Skipping invalid email record {i}")
+            except Exception as e:
+                print(f"Failed to sanitize email record {i}: {e}")
+                continue
+        
+        if not sanitized_records:
+            print("No valid email records to save")
+            return None
+        
+        # Serialize and encrypt data
+        import json
+        json_data = json.dumps(sanitized_records, ensure_ascii=False, indent=2, default=str)
+        encrypted_data = credential_manager.encrypt_credential(json_data)
+        
+        # Save encrypted data with secure file permissions
         with open(path, "w", encoding="utf-8") as f:
-            json.dump(records, f, ensure_ascii=False, indent=2, default=str)
-        print(f"Saved {len(records)} emails to {path}")
+            f.write(encrypted_data)
+        
+        # Set restrictive file permissions (owner read/write only)
+        os.chmod(path, 0o600)
+        
+        print(f"✅ Securely saved {len(sanitized_records)} emails to {path}")
         return path
+        
     except Exception as e:
-        print(f"Error saving emails: {e}")
+        print(f"Error saving emails securely: {e}")
+        # Clean up partial file if it exists
+        if os.path.exists(path):
+            try:
+                os.remove(path)
+            except:
+                pass
         return None

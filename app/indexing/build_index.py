@@ -12,31 +12,61 @@ from app.embeddings.provider import configure_embeddings
 
 
 def _load_raw_emails(path: str) -> List[Dict[str, Any]]:
-    """Load emails from .json (list) or .jsonl (one JSON per line)."""
+    """Load emails from .json, .jsonl, or .json.enc (encrypted) files."""
+    from app.security.encryption import credential_manager
+    
     emails: List[Dict[str, Any]] = []
-    if path.endswith(".jsonl"):
-        with open(path, "r", encoding="utf-8") as f:
-            for line in f:
-                if line.strip():
-                    emails.append(json.loads(line))
-    elif path.endswith(".json"):
-        with open(path, "r", encoding="utf-8") as f:
-            data = json.load(f)
+    
+    try:
+        # Handle encrypted files
+        if path.endswith(".json.enc"):
+            print(f"🔓 Decrypting email file: {path}")
+            with open(path, "r", encoding="utf-8") as f:
+                encrypted_content = f.read().strip()
+            
+            # Decrypt the content
+            decrypted_content = credential_manager.decrypt_credential(encrypted_content)
+            data = json.loads(decrypted_content)
+            
             if isinstance(data, list):
                 emails = data
             else:
                 raise ValueError(f"{path} must contain a JSON list")
-    else:
-        raise ValueError(f"Unsupported raw format: {path}")
-    return emails
+                
+        elif path.endswith(".jsonl"):
+            with open(path, "r", encoding="utf-8") as f:
+                for line in f:
+                    if line.strip():
+                        emails.append(json.loads(line))
+                        
+        elif path.endswith(".json"):
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                if isinstance(data, list):
+                    emails = data
+                else:
+                    raise ValueError(f"{path} must contain a JSON list")
+        else:
+            raise ValueError(f"Unsupported raw format: {path}")
+            
+        print(f"📧 Successfully loaded {len(emails)} emails from {path}")
+        return emails
+        
+    except Exception as e:
+        print(f"❌ Failed to load emails from {path}: {e}")
+        raise
 
 
 def _resolve_latest_raw(explicit_path: Optional[str]) -> str:
-    """Pick the explicit file, or newest file in data/raw/, by modified time."""
+    """Pick the explicit file, or newest file in data/raw/, by modified time (supports encrypted files)."""
     if explicit_path and os.path.exists(explicit_path):
         return explicit_path
 
-    candidates = glob.glob("data/raw/*.json") + glob.glob("data/raw/*.jsonl")
+    # Look for both encrypted and unencrypted files
+    candidates = (glob.glob("data/raw/*.json") + 
+                  glob.glob("data/raw/*.jsonl") + 
+                  glob.glob("data/raw/*.json.enc"))
+    
     if not candidates:
         raise FileNotFoundError("No raw files found in data/raw/. Run `python main.py ingest` first.")
 
@@ -85,8 +115,8 @@ def build_index(raw_path: Optional[str] = None, persist_dir: str = "data/index")
         if not text:
             continue
         
-        # Normalize sender for better matching
-        sender = e.get("from_") or e.get("from") or "unknown"
+        # Use clean sender field if available, fallback to original
+        sender = e.get("sender") or e.get("from_") or e.get("from") or "unknown"
         sender_normalized = _normalize_sender(sender)
         unique_senders.add(sender_normalized)
         

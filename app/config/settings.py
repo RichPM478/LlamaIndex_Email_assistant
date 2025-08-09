@@ -4,21 +4,71 @@ from pydantic_settings import BaseSettings
 from pydantic import Field
 
 def _parse_listish(v: Optional[str]) -> List[str]:
-    """Accepts: empty -> [], 'a,b' -> ['a','b'], JSON list -> list"""
+    """Securely parse list-like strings, preventing JSON injection attacks"""
     if not v:
         return []
     s = v.strip()
     if not s:
         return []
-    if s.startswith("["):
+    
+    # Length validation to prevent DoS
+    if len(s) > 10000:
+        raise ValueError("Input string too long")
+    
+    # If it looks like JSON, validate it securely
+    if s.startswith("[") and s.endswith("]"):
         import json
         try:
+            # Parse JSON with strict validation
             data = json.loads(s)
-            if isinstance(data, list):
-                return [str(x).strip() for x in data if str(x).strip()]
-        except Exception:
+            
+            # Validate structure - must be a simple list
+            if not isinstance(data, list):
+                raise ValueError("Must be a list")
+            
+            # Validate list contents
+            if len(data) > 100:  # Reasonable limit
+                raise ValueError("List too long")
+            
+            result = []
+            for item in data:
+                # Only allow simple string/number types
+                if not isinstance(item, (str, int, float)):
+                    raise ValueError("List items must be strings or numbers")
+                
+                item_str = str(item).strip()
+                # Validate string content
+                if len(item_str) > 200:
+                    raise ValueError("List item too long")
+                
+                # Basic validation - no dangerous characters
+                if any(char in item_str for char in ['<', '>', '"', "'", '&', '\n', '\r']):
+                    raise ValueError("Invalid characters in list item")
+                
+                if item_str:
+                    result.append(item_str)
+            
+            return result
+            
+        except (json.JSONDecodeError, ValueError, TypeError) as e:
+            # If JSON parsing fails, fall back to comma-separated parsing
             pass
-    return [item.strip() for item in s.split(",") if item.strip()]
+    
+    # Secure comma-separated parsing
+    items = []
+    for item in s.split(","):
+        item = item.strip()
+        if len(item) > 200:
+            continue  # Skip overly long items
+        
+        # Basic validation
+        if any(char in item for char in ['<', '>', '"', "'", '\n', '\r']):
+            continue  # Skip items with dangerous characters
+        
+        if item:
+            items.append(item)
+    
+    return items[:100]  # Limit final result size
 
 class Settings(BaseSettings):
     # ---------- LLM provider ----------

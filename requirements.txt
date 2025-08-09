@@ -10,6 +10,7 @@ llama-index-embeddings-openai
 sentence-transformers
 # Utils
 bs4
+beautifulsoup4
 typer
 pydantic>=2
 pydantic-settings>=2.1.0
@@ -17,3 +18,5 @@ python-dateutil
 dateparser
 ics
 streamlit
+# Security
+cryptography>=3.4.8

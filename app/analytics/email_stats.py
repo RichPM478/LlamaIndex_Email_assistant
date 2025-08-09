@@ -8,36 +8,66 @@ import re
 from pathlib import Path
 
 def load_emails_from_raw(raw_path: Optional[str] = None) -> List[Dict[str, Any]]:
-    """Load emails from the latest raw file"""
+    """Load emails from the latest raw file (supports encrypted files)"""
+    from app.security.encryption import credential_manager
+    
     if not raw_path:
-        # Find the latest file in data/raw/
+        # Find the latest file in data/raw/ (including encrypted files)
         raw_dir = Path("data/raw")
         if not raw_dir.exists():
             return []
         
-        files = list(raw_dir.glob("*.json")) + list(raw_dir.glob("*.jsonl"))
+        files = (list(raw_dir.glob("*.json")) + 
+                 list(raw_dir.glob("*.jsonl")) + 
+                 list(raw_dir.glob("*.json.enc")))
         if not files:
             return []
         
         raw_path = max(files, key=lambda f: f.stat().st_mtime)
     
     emails = []
-    if str(raw_path).endswith(".jsonl"):
-        with open(raw_path, "r", encoding="utf-8") as f:
-            for line in f:
-                if line.strip():
-                    emails.append(json.loads(line))
-    else:
-        with open(raw_path, "r", encoding="utf-8") as f:
-            data = json.load(f)
+    raw_path_str = str(raw_path)
+    
+    try:
+        if raw_path_str.endswith(".json.enc"):
+            # Handle encrypted files
+            with open(raw_path, "r", encoding="utf-8") as f:
+                encrypted_content = f.read().strip()
+            
+            # Decrypt and load
+            decrypted_content = credential_manager.decrypt_credential(encrypted_content)
+            data = json.loads(decrypted_content)
             if isinstance(data, list):
                 emails = data
+                
+        elif raw_path_str.endswith(".jsonl"):
+            with open(raw_path, "r", encoding="utf-8") as f:
+                for line in f:
+                    if line.strip():
+                        emails.append(json.loads(line))
+        else:
+            with open(raw_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                if isinstance(data, list):
+                    emails = data
+        
+        print(f"Analytics loaded {len(emails)} emails from {raw_path.name}")
+        
+    except Exception as e:
+        print(f"Failed to load emails for analytics: {e}")
+        return []
     
     return emails
 
 
-def extract_sender_name(from_field: str) -> str:
-    """Extract clean sender name from email 'from' field"""
+def extract_sender_name(email_data: Dict[str, Any]) -> str:
+    """Extract clean sender name from email data (handles both old and new formats)"""
+    # Try new clean format first
+    if email_data.get('sender'):
+        return email_data['sender']
+    
+    # Fallback to old format and clean it
+    from_field = email_data.get('from_') or email_data.get('from') or ""
     if not from_field:
         return "Unknown"
     
@@ -81,16 +111,16 @@ def parse_email_date(date_str: str) -> Optional[datetime]:
 def extract_key_topics(emails: List[Dict[str, Any]]) -> Dict[str, int]:
     """Extract common topics/keywords from email subjects and bodies"""
     topic_patterns = {
-        "📅 Events": ["event", "meeting", "conference", "assembly", "concert", "performance", "sports day"],
-        "💰 Payments": ["payment", "pay", "fee", "cost", "money", "£", "$", "invoice", "due"],
-        "📝 Forms": ["form", "permission", "slip", "sign", "submit", "return", "deadline"],
-        "🏫 School Info": ["closure", "closed", "holiday", "break", "term", "semester"],
-        "🚌 Transport": ["bus", "transport", "pick up", "drop off", "parking"],
-        "🍽️ Food": ["lunch", "menu", "meal", "food", "cafeteria", "dietary"],
-        "📚 Academic": ["homework", "assignment", "test", "exam", "report", "grades"],
-        "🎯 Activities": ["club", "activity", "after school", "extracurricular", "team"],
-        "📢 Announcements": ["announcement", "update", "news", "important", "urgent"],
-        "👕 Uniform": ["uniform", "dress code", "clothing", "wear"],
+        "Events": ["event", "meeting", "conference", "assembly", "concert", "performance", "sports day"],
+        "Payments": ["payment", "pay", "fee", "cost", "money", "£", "$", "invoice", "due"],
+        "Forms": ["form", "permission", "slip", "sign", "submit", "return", "deadline"],
+        "School Info": ["closure", "closed", "holiday", "break", "term", "semester"],
+        "Transport": ["bus", "transport", "pick up", "drop off", "parking"],
+        "Food": ["lunch", "menu", "meal", "food", "cafeteria", "dietary"],
+        "Academic": ["homework", "assignment", "test", "exam", "report", "grades"],
+        "Activities": ["club", "activity", "after school", "extracurricular", "team"],
+        "Announcements": ["announcement", "update", "news", "important", "urgent"],
+        "Uniform": ["uniform", "dress code", "clothing", "wear"],
     }
     
     topic_counts = defaultdict(int)
@@ -114,14 +144,18 @@ def get_email_analytics(emails: List[Dict[str, Any]], days_back: int = 30) -> Di
         filtered_emails = []
         for email in emails:
             email_date = parse_email_date(email.get('date', ''))
-            if email_date and email_date >= cutoff_date:
-                filtered_emails.append(email)
+            if email_date:
+                # Make both dates timezone-naive for comparison
+                if email_date.tzinfo is not None:
+                    email_date = email_date.replace(tzinfo=None)
+                if email_date >= cutoff_date:
+                    filtered_emails.append(email)
         emails_to_analyze = filtered_emails
     else:
         emails_to_analyze = emails
     
-    # Top senders
-    senders = [extract_sender_name(e.get('from', '')) for e in emails_to_analyze]
+    # Top senders - handle both old and new formats
+    senders = [extract_sender_name(e) for e in emails_to_analyze]
     sender_counts = Counter(senders)
     
     # Email volume by date
@@ -129,6 +163,9 @@ def get_email_analytics(emails: List[Dict[str, Any]], days_back: int = 30) -> Di
     for email in emails_to_analyze:
         email_date = parse_email_date(email.get('date', ''))
         if email_date:
+            # Make timezone-naive before getting date
+            if email_date.tzinfo is not None:
+                email_date = email_date.replace(tzinfo=None)
             dates.append(email_date.date())
     date_counts = Counter(dates)
     
@@ -140,6 +177,9 @@ def get_email_analytics(emails: List[Dict[str, Any]], days_back: int = 30) -> Di
     for email in emails_to_analyze:
         email_date = parse_email_date(email.get('date', ''))
         if email_date:
+            # Make timezone-naive for consistent hour handling
+            if email_date.tzinfo is not None:
+                email_date = email_date.replace(tzinfo=None)
             hours.append(email_date.hour)
     hour_counts = Counter(hours)
     
@@ -148,6 +188,9 @@ def get_email_analytics(emails: List[Dict[str, Any]], days_back: int = 30) -> Di
     for email in emails_to_analyze:
         email_date = parse_email_date(email.get('date', ''))
         if email_date:
+            # Make timezone-naive for consistent day handling
+            if email_date.tzinfo is not None:
+                email_date = email_date.replace(tzinfo=None)
             weekdays.append(email_date.strftime('%A'))
     weekday_counts = Counter(weekdays)
     
@@ -185,6 +228,9 @@ def get_email_trends(emails: List[Dict[str, Any]]) -> Dict[str, Any]:
     for email in emails:
         email_date = parse_email_date(email.get('date', ''))
         if email_date:
+            # Make timezone-naive for consistent week calculation
+            if email_date.tzinfo is not None:
+                email_date = email_date.replace(tzinfo=None)
             week = email_date.isocalendar()[1]
             year = email_date.year
             weekly_volumes[f"{year}-W{week:02d}"] += 1
@@ -245,6 +291,9 @@ def find_important_emails(emails: List[Dict[str, Any]], limit: int = 5) -> List[
         # Recent emails get a bonus
         email_date = parse_email_date(email.get('date', ''))
         if email_date:
+            # Make timezone-naive for comparison
+            if email_date.tzinfo is not None:
+                email_date = email_date.replace(tzinfo=None)
             days_old = (datetime.now() - email_date).days
             if days_old <= 7:
                 score += 3
@@ -264,7 +313,7 @@ def find_important_emails(emails: List[Dict[str, Any]], limit: int = 5) -> List[
     return [
         {
             'subject': e['email'].get('subject', 'No subject'),
-            'from': extract_sender_name(e['email'].get('from', '')),
+            'from': extract_sender_name(e['email']),
             'date': e['date'].isoformat() if e['date'] else 'Unknown',
             'importance_score': e['score']
         }
