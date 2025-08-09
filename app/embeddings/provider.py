@@ -19,26 +19,45 @@ def configure_embeddings(settings=None):
         if device == "cuda":
             gpu_name = torch.cuda.get_device_name(0)
             vram_gb = torch.cuda.get_device_properties(0).total_memory / (1024**3)
-            print(f"🚀 GPU ENABLED for Embeddings!")
+            print(f"[GPU] Embeddings will use GPU acceleration")
             print(f"   GPU: {gpu_name}")
             print(f"   VRAM: {vram_gb:.1f} GB")
             torch.cuda.empty_cache()
         else:
-            print("⚠️ Running embeddings on CPU")
+            print("[CPU] Running embeddings on CPU")
         
-        # Create embedding model - WITHOUT batch_size parameter
-        embed = HuggingFaceEmbedding(
-            model_name=settings.embedding_model,
-            device=device,
-            # Don't pass batch_size here - it's not a valid parameter
-            # max_length is also not valid for HuggingFaceEmbedding
-        )
-        
-        # Set batch size after initialization if needed
-        # This is handled internally by the model
+        # Create embedding model directly with the correct device
+        # The HuggingFaceEmbedding class accepts device as a parameter
+        try:
+            # First try loading directly to the desired device
+            embed = HuggingFaceEmbedding(
+                model_name=settings.embedding_model,
+                device=device,  # Pass the device directly
+                trust_remote_code=True,
+                cache_folder=None,
+                embed_batch_size=32 if device == "cuda" else 10,  # Larger batch for GPU
+            )
+            print(f"[SUCCESS] Configured embeddings: {settings.embedding_model} on {device.upper()}")
+            
+        except Exception as e:
+            print(f"[WARNING] Failed to load model on {device}: {e}")
+            print("[WARNING] Attempting fallback to CPU...")
+            
+            # Fallback to CPU if GPU fails
+            try:
+                embed = HuggingFaceEmbedding(
+                    model_name=settings.embedding_model,
+                    device="cpu",
+                    trust_remote_code=False,
+                    embed_batch_size=10,
+                )
+                print(f"[SUCCESS] Configured embeddings: {settings.embedding_model} on CPU (fallback)")
+                
+            except Exception as cpu_error:
+                print(f"[ERROR] Failed to load embeddings model: {cpu_error}")
+                raise
         
         Settings.embed_model = embed
-        print(f"✅ Configured embeddings: {settings.embedding_model} on {device.upper()}")
         return embed
     
     elif provider == 'openai':

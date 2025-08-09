@@ -18,7 +18,7 @@ def configure_llm(settings=None):
             additional_kwargs={"num_ctx": settings.ollama_num_ctx},
         )
         Settings.llm = llm
-        print(f"✅ Configured Ollama with model: {settings.ollama_model}")
+        print(f"[SUCCESS] Configured Ollama with model: {settings.ollama_model}")
         return llm
 
     elif provider == "openai":

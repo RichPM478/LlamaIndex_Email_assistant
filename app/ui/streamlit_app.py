@@ -19,7 +19,7 @@ from app.security.auth import auth
 
 # Try to import the simple query first, fall back to regular
 try:
-    from app.qa.simple_query import simple_ask as ask
+    from app.qa.optimized_query import optimized_ask as ask
     print("[DEBUG] Using simple_query module")
 except ImportError:
     from app.qa.query_engine import ask

@@ -9,6 +9,7 @@ from datetime import datetime
 from app.config.settings import get_settings
 from app.llm.provider import configure_llm
 from app.embeddings.provider import configure_embeddings
+from app.ingest.email_parser import CleanEmailParser
 
 
 def _load_raw_emails(path: str) -> List[Dict[str, Any]]:
@@ -49,11 +50,11 @@ def _load_raw_emails(path: str) -> List[Dict[str, Any]]:
         else:
             raise ValueError(f"Unsupported raw format: {path}")
             
-        print(f"📧 Successfully loaded {len(emails)} emails from {path}")
+        print(f"[SUCCESS] Loaded {len(emails)} emails from {path}")
         return emails
         
     except Exception as e:
-        print(f"❌ Failed to load emails from {path}: {e}")
+        print(f"[ERROR] Failed to load emails from {path}: {e}")
         raise
 
 
@@ -103,28 +104,45 @@ def build_index(raw_path: Optional[str] = None, persist_dir: str = "data/index")
     emails = _load_raw_emails(raw_file)
     print(f"[index] Processing {len(emails)} emails")
 
-    # Use smaller chunks for better precision
-    splitter = SentenceSplitter(chunk_size=512, chunk_overlap=50)
+    # Initialize email parser for HTML cleaning
+    parser = CleanEmailParser()
+    
+    # Use smaller chunks for clean text
+    splitter = SentenceSplitter(chunk_size=256, chunk_overlap=30)
     nodes: List[TextNode] = []
     
     # Track unique senders for debugging
     unique_senders = set()
     
     for i, e in enumerate(emails):
-        text = (e.get("body_text") or e.get("body") or "").strip()
-        if not text:
+        # Extract clean text from body (handles HTML)
+        body_raw = e.get("body") or ""
+        
+        # Clean the email body - automatically detects HTML
+        if body_raw:
+            # Determine content type
+            content_type = "text/html" if "<html" in body_raw.lower() or "<body" in body_raw.lower() else "text/plain"
+            text = parser.clean_email_body(body_raw, content_type)
+        else:
+            text = ""
+            
+        if not text or len(text.strip()) < 10:
             continue
         
-        # Use clean sender field if available, fallback to original
-        sender = e.get("sender") or e.get("from_") or e.get("from") or "unknown"
+        # Clean sender field
+        sender_raw = e.get("from") or e.get("from_") or "unknown"
+        sender = parser.clean_sender(sender_raw)
         sender_normalized = _normalize_sender(sender)
         unique_senders.add(sender_normalized)
+        
+        # Clean subject line
+        subject = parser.clean_subject(e.get("subject") or "No subject")
         
         # Enhanced metadata with normalized fields
         meta = {
             "message_id": e.get("message_id"),
             "uid": e.get("uid"),
-            "subject": e.get("subject") or "No subject",
+            "subject": subject,
             "from": sender,  # Keep original
             "from_normalized": sender_normalized,  # Add normalized version
             "date": e.get("date"),
@@ -135,7 +153,7 @@ def build_index(raw_path: Optional[str] = None, persist_dir: str = "data/index")
         
         # Create a more informative text representation
         # Include metadata in the text for better semantic matching
-        enhanced_text = f"From: {sender}\nSubject: {e.get('subject', 'No subject')}\n\n{text}"
+        enhanced_text = f"From: {sender}\nSubject: {subject}\n\n{text}"
         
         # Split into chunks
         chunks = splitter.split_text(enhanced_text)
