@@ -1,0 +1,14 @@
+{
+  "last_update": "2025-08-09T12:49:37.593564",
+  "total_emails_indexed": 1000,
+  "total_nodes": 12390,
+  "source_files": {
+    "data/raw\\emails_20250809_001105.json": {
+      "path": "data/raw\\emails_20250809_001105.json",
+      "size": 13105180,
+      "modified_time": 1754694666.0349555,
+      "hash": "ad50324b0539846c880bb023302b3b6d"
+    }
+  },
+  "version": "1.0"
+}

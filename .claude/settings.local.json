@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(streamlit run:*)",
+      "Bash(pip install:*)",
+      "Bash(grep:*)",
+      "Bash(python:*)",
+      "Bash(rm:*)",
+      "Bash(timeout 60 python:*)"
+    ],
+    "deny": []
+  }
+}

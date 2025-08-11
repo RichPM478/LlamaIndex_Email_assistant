@@ -82,7 +82,7 @@ class QueryIntelligenceEngine:
                 r'\b([A-Z][a-z]*(?:\s+[A-Z][a-z]*)*)\s+(?:project|update|report)',
             ],
             QueryIntent.ASK_SUMMARY: [
-                r'\b(?:summarize|summary|overview|what\'s new)',
+                r'\b(?:summarize|summarise|summary|overview|what\'s new)',
                 r'\b(?:catch me up|fill me in|brief me)',
                 r'\b(?:recent|latest|new)\s+(?:emails|messages|updates)',
             ],

@@ -20,7 +20,7 @@ from llama_index.core.schema import TextNode
 from app.config.settings import get_settings
 from app.llm.provider import configure_llm
 from app.embeddings.provider import configure_embeddings
-from app.ingest.advanced_email_parser import AdvancedEmailParser
+from app.ingest.mailparser_adapter import MailParserAdapter
 
 
 def _load_raw_emails(path: str) -> List[Dict[str, Any]]:
@@ -109,7 +109,7 @@ def build_quality_index(raw_path: Optional[str] = None,
     print(f"[QUALITY-INDEX] Processing {len(emails)} emails with quality filtering")
 
     # Initialize Advanced Email Parser 2.0
-    parser = AdvancedEmailParser()
+    parser = MailParserAdapter()
     
     # Use smaller chunks for clean text
     splitter = SentenceSplitter(chunk_size=256, chunk_overlap=30)

@@ -24,7 +24,7 @@ from dataclasses import dataclass
 import hashlib
 
 from app.config.settings import get_settings
-from app.ingest.advanced_email_parser import AdvancedEmailParser
+from app.ingest.mailparser_adapter import MailParserAdapter
 from app.indexing.quality_indexer import build_quality_index
 
 @dataclass
@@ -70,7 +70,7 @@ class LiveEmailSync:
         self.state_file = state_file
         
         # Components
-        self.parser = AdvancedEmailParser()
+        self.parser = MailParserAdapter()
         self.imap_connection = None
         self.status = SyncStatus()
         

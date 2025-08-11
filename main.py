@@ -2,7 +2,7 @@ import typer
 from typing import Optional
 from app.ingest.imap_loader import fetch_emails, save_raw_emails
 from app.indexing.build_index import build_index
-from app.qa.unified_query import optimized_ask as ask
+from app.qa.intelligent_query import intelligent_ask as ask
 
 app = typer.Typer(help="School Email Summarizer (POC) CLI")
 
