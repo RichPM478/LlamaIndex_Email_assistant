@@ -79,3 +79,6 @@ desktop.ini
 *.backup
 *.cache
 .cache/
+.env
+data/index/
+data/enhanced_index/

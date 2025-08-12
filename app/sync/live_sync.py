@@ -25,7 +25,7 @@ import hashlib
 
 from app.config.settings import get_settings
 from app.ingest.mailparser_adapter import MailParserAdapter
-from app.indexing.quality_indexer import build_quality_index
+from app.indexing.build_index import build_index
 
 @dataclass
 class SyncStatus:

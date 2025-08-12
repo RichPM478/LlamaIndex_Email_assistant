@@ -6,7 +6,7 @@ from datetime import datetime
 import time
 import html
 import re
-from app.qa.intelligent_query import intelligent_ask
+from app.qa.lazy_query import lazy_optimized_ask
 from app.qa.lazy_query import get_cache_status
 
 def sanitize_html_content(text):
@@ -68,6 +68,46 @@ st.markdown("""
         word-wrap: break-word;
     }
     
+    /* Enhanced assistant message container for markdown */
+    .assistant-message-container {
+        background: #f9fafb;
+        border-left: 3px solid #667eea;
+        padding: 16px;
+        border-radius: 8px;
+        margin: 10px 0;
+        max-width: 85%;
+    }
+    
+    .assistant-message-container h2 {
+        color: #1f2937;
+        font-size: 1.3em;
+        margin-top: 0;
+        margin-bottom: 12px;
+    }
+    
+    .assistant-message-container h3 {
+        color: #4b5563;
+        font-size: 1.1em;
+        margin-top: 16px;
+        margin-bottom: 8px;
+    }
+    
+    .assistant-message-container ul {
+        margin: 8px 0;
+        padding-left: 20px;
+    }
+    
+    .assistant-message-container li {
+        margin: 4px 0;
+        color: #374151;
+    }
+    
+    .assistant-message-container hr {
+        border: none;
+        border-top: 1px solid #e5e7eb;
+        margin: 16px 0;
+    }
+    
     /* Source cards */
     .source-card {
         background: white;
@@ -127,7 +167,7 @@ if "messages" not in st.session_state:
     # Add welcome message
     st.session_state.messages.append({
         "role": "assistant",
-        "content": "👋 Hi! I'm your email assistant. I can help you find information from your emails. Try asking me about recent emails, payments, events, or specific senders!",
+        "content": "👋 Hi! I'm your simplified email assistant. I can help you find information from your emails using the enhanced ingest pipeline. Try asking me about recent emails, payments, events, or specific senders!",
         "timestamp": datetime.now()
     })
 
@@ -142,8 +182,8 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
-# Quick actions with Phase 3C intelligence
-st.markdown("### 💡 Smart Actions")
+# Quick actions
+st.markdown("### 💡 Quick Actions")
 cols = st.columns(4)
 quick_queries = [
     "📅 What events are coming up?",
@@ -172,41 +212,20 @@ with chat_container:
             st.markdown(f'<div class="user-message">{message["content"]}</div>', 
                        unsafe_allow_html=True)
         else:
-            # Assistant message - sanitize content
-            safe_content = sanitize_html_content(message["content"])
-            st.markdown(f'<div class="assistant-message">{safe_content}</div>', 
-                       unsafe_allow_html=True)
+            # Assistant message - use markdown for rich formatting
+            # Check if content has markdown formatting
+            content = message["content"]
+            if '##' in content or '**' in content or '•' in content or '###' in content:
+                # Display as markdown with custom styling
+                st.markdown(f'<div class="assistant-message-container">', unsafe_allow_html=True)
+                st.markdown(content)  # Let Streamlit handle markdown rendering
+                st.markdown('</div>', unsafe_allow_html=True)
+            else:
+                # Fallback for plain text
+                safe_content = sanitize_html_content(content)
+                st.markdown(f'<div class="assistant-message">{safe_content}</div>', 
+                           unsafe_allow_html=True)
             
-            # Show query intelligence insights if available (Phase 3C)
-            if "intelligence" in message and message["intelligence"]:
-                intelligence = message["intelligence"]
-                
-                if intelligence.get('intent') != 'general' and intelligence.get('confidence', 0) > 0.3:
-                    with st.expander("🧠 Query Intelligence", expanded=False):
-                        intent = intelligence.get('intent', 'unknown').replace('_', ' ').title()
-                        confidence = intelligence.get('confidence', 0)
-                        
-                        st.markdown(f"**Intent:** {intent} ({confidence:.0%} confidence)")
-                        
-                        if intelligence.get('enhanced_query') != intelligence.get('original_query'):
-                            st.markdown(f"**Enhanced Query:** {intelligence.get('enhanced_query', '')}")
-                        
-                        if intelligence.get('extracted_entities'):
-                            entities = []
-                            for entity_type, values in intelligence.get('extracted_entities', {}).items():
-                                if values:
-                                    entities.append(f"**{entity_type.title()}:** {', '.join(map(str, values))}")
-                            if entities:
-                                st.markdown("**Detected Entities:**")
-                                for entity in entities:
-                                    st.markdown(f"  • {entity}")
-                        
-                        if intelligence.get('context'):
-                            st.markdown(f"**Context:** {intelligence.get('context', '')}")
-                        
-                        processing_time = intelligence.get('processing_time', 0)
-                        if processing_time > 0:
-                            st.markdown(f"**Processing Time:** {processing_time:.3f}s")
             
             # Show sources if available
             if "sources" in message:
@@ -240,19 +259,18 @@ if st.session_state.processing:
     with st.spinner("🔍 Searching through your emails..."):
         last_user_msg = st.session_state.messages[-1]["content"]
         
-        # Get intelligent response (Phase 3C enhancement)
+        # Get response using enhanced ingest pipeline
         start_time = time.time()
-        result = intelligent_ask(last_user_msg, top_k=5, debug=False)
+        result = lazy_optimized_ask(last_user_msg, top_k=5, include_sources=False)  # Sources shown separately
         response_time = time.time() - start_time
         
-        # Add assistant response with intelligence metadata
+        # Add assistant response
         assistant_msg = {
             "role": "assistant",
             "content": result["answer"],
             "sources": result.get("citations", []),
             "timestamp": datetime.now(),
-            "response_time": response_time,
-            "intelligence": result.get("query_intelligence", {})
+            "response_time": response_time
         }
         st.session_state.messages.append(assistant_msg)
         st.session_state.processing = False
@@ -405,7 +423,7 @@ with st.sidebar:
     if st.button("🗑️ Clear Chat", use_container_width=True):
         st.session_state.messages = [{
             "role": "assistant",
-            "content": "👋 Chat cleared! How can I help you with your emails?",
+            "content": "👋 Chat cleared! How can I help you with your emails using the enhanced pipeline?",
             "timestamp": datetime.now()
         }]
         st.rerun()

@@ -6,7 +6,9 @@
       "Bash(grep:*)",
       "Bash(python:*)",
       "Bash(rm:*)",
-      "Bash(timeout 60 python:*)"
+      "Bash(timeout 60 python:*)",
+      "Bash(find:*)",
+      "Bash(git restore:*)"
     ],
     "deny": []
   }

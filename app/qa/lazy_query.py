@@ -6,6 +6,7 @@ This should import in <50ms instead of 3500ms.
 from typing import Dict, Any, List, Optional, TYPE_CHECKING
 import time
 from enum import Enum
+from app.qa.response_formatter import ResponseFormatter
 
 # Type checking imports (no runtime cost)
 if TYPE_CHECKING:
@@ -24,15 +25,17 @@ class LazyEmailQueryEngine:
     Heavy imports are deferred until first actual query.
     """
     
-    def __init__(self, strategy: QueryStrategy = QueryStrategy.OPTIMIZED, persist_dir: str = "data/index"):
+    def __init__(self, strategy: QueryStrategy = QueryStrategy.OPTIMIZED, persist_dir: str = "data/index", use_hybrid: bool = True):
         self.strategy = strategy
         self.persist_dir = persist_dir
+        self.use_hybrid = use_hybrid
         
         # Lazy-loaded components (None until needed)
         self._settings: Optional["Settings"] = None
         self._llm_configured = False
         self._embeddings_configured = False
         self._index: Optional["VectorStoreIndex"] = None
+        self._hybrid_retriever = None
         self._last_loaded = None
         
         # Import states
@@ -150,13 +153,36 @@ class LazyEmailQueryEngine:
         target_sender = self._extract_sender_from_query(question)
         actual_top_k = min(top_k * 2, 20) if target_sender else top_k
         
-        # Create query engine
-        query_engine = index.as_query_engine(
-            similarity_top_k=actual_top_k,
-            response_mode=kwargs.get("response_mode", "compact"),
-            streaming=kwargs.get("streaming", False),
-            verbose=False
-        )
+        # Create query engine with hybrid search if available
+        if self.use_hybrid:
+            try:
+                # Lazy import hybrid retriever
+                from app.retrieval.hybrid_retriever import create_hybrid_query_engine
+                
+                query_engine = create_hybrid_query_engine(
+                    index=index,
+                    vector_weight=0.6,
+                    bm25_weight=0.4,
+                    use_reranker=True,
+                    response_mode=kwargs.get("response_mode", "compact")
+                )
+                print("[LAZY] Using hybrid search with reranking")
+            except Exception as e:
+                print(f"[WARNING] Could not initialize hybrid search: {e}")
+                print("[WARNING] Falling back to standard vector search")
+                query_engine = index.as_query_engine(
+                    similarity_top_k=actual_top_k,
+                    response_mode=kwargs.get("response_mode", "compact"),
+                    streaming=kwargs.get("streaming", False),
+                    verbose=False
+                )
+        else:
+            query_engine = index.as_query_engine(
+                similarity_top_k=actual_top_k,
+                response_mode=kwargs.get("response_mode", "compact"),
+                streaming=kwargs.get("streaming", False),
+                verbose=False
+            )
         
         # Execute query
         query_start = time.time()
@@ -205,8 +231,17 @@ class LazyEmailQueryEngine:
         
         total_time = time.time() - total_start
         
+        # Format the response for better readability
+        raw_answer = str(response)
+        formatted_answer = ResponseFormatter.format_response(raw_answer, citations, question)
+        
+        # Add citations to formatted answer if requested
+        if kwargs.get('include_sources', False):
+            formatted_answer += ResponseFormatter.format_citations(citations)
+        
         return {
-            "answer": str(response),
+            "answer": formatted_answer,
+            "raw_answer": raw_answer,  # Keep raw for compatibility
             "citations": citations,
             "metadata": {
                 "total_time": total_time,
@@ -214,7 +249,8 @@ class LazyEmailQueryEngine:
                 "top_k": top_k,
                 "filtered_by_sender": target_sender is not None,
                 "lazy_loaded": True,
-                "strategy": "lazy_optimized"
+                "strategy": "lazy_optimized",
+                "hybrid_search": self.use_hybrid
             }
         }
     

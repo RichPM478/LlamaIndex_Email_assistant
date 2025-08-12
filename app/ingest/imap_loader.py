@@ -115,30 +115,87 @@ def fetch_emails(settings, limit=200):
             # Parse email message with clean parser
             msg = email.message_from_bytes(msg_data[0][1])
             
-            # Use clean email parser
-            from app.ingest.email_parser import email_parser
-            parsed_email = email_parser.parse_email(msg)
+            # Convert email message to dict format for parsing
+            email_dict = {
+                'from': msg.get('From', ''),
+                'to': msg.get('To', ''),
+                'cc': msg.get('Cc', ''),
+                'subject': msg.get('Subject', ''),
+                'date': msg.get('Date', ''),
+                'message_id': msg.get('Message-ID', ''),
+                'uid': mail_id.decode()
+            }
             
-            # Apply filters using clean sender and subject
+            # Extract body text
+            body = ""
+            if msg.is_multipart():
+                for part in msg.walk():
+                    content_type = part.get_content_type()
+                    if content_type == "text/plain":
+                        try:
+                            payload = part.get_payload(decode=True)
+                            if payload:
+                                body += payload.decode('utf-8', errors='ignore')
+                        except:
+                            pass
+                    elif content_type == "text/html" and not body:
+                        try:
+                            payload = part.get_payload(decode=True)
+                            if payload:
+                                html_content = payload.decode('utf-8', errors='ignore')
+                                from bs4 import BeautifulSoup
+                                soup = BeautifulSoup(html_content, 'html.parser')
+                                body = soup.get_text()
+                        except:
+                            pass
+            else:
+                try:
+                    payload = msg.get_payload(decode=True)
+                    if payload:
+                        body = payload.decode('utf-8', errors='ignore')
+                except:
+                    body = str(msg.get_payload())
+            
+            email_dict['body'] = body.strip()
+            
+            # Use MailParserAdapter for parsing
+            from app.ingest.mailparser_adapter import MailParserAdapter
+            parser = MailParserAdapter()
+            parsed_email = parser.parse_email_advanced(email_dict)
+            
+            # Apply filters using parsed data
+            sender_name = parsed_email.get('from_name', '')
+            sender_email = parsed_email.get('from_email', '')
+            subject = parsed_email.get('subject', '')
+            
             if settings.filter_from:
-                if not any(f.lower() in parsed_email["sender"].lower() for f in settings.filter_from):
+                sender_combined = f"{sender_name} {sender_email}".lower()
+                if not any(f.lower() in sender_combined for f in settings.filter_from):
                     continue
             if settings.filter_subject:
-                if not any(f.lower() in parsed_email["subject"].lower() for f in settings.filter_subject):
+                if not any(f.lower() in subject.lower() for f in settings.filter_subject):
                     continue
             
-            # Create clean email record
+            # Create email record using parsed data
             email_record = {
-                "sender": parsed_email["sender"],
-                "subject": parsed_email["subject"],
-                "cc_recipients": parsed_email["cc_recipients"],
-                "body": parsed_email["body"],
-                "date": parsed_email["date"],
-                "message_id": parsed_email["message_id"],
-                "uid": str(mail_id),
-                # Keep original fields for backward compatibility
-                "from": parsed_email["from"],
-                "raw_subject": parsed_email["raw_subject"]
+                # Basic fields for backward compatibility
+                'from': parsed_email.get('from_email', ''),
+                'to': parsed_email.get('to_email', ''),
+                'subject': parsed_email.get('subject', ''),
+                'date': parsed_email.get('date', ''),
+                'body': parsed_email.get('clean_body', ''),
+                'message_id': parsed_email.get('message_id', ''),
+                'uid': email_dict.get('uid', ''),
+                
+                # Enhanced fields
+                'from_name': parsed_email.get('from_name', ''),
+                'from_email': parsed_email.get('from_email', ''),
+                'to_email': parsed_email.get('to_email', ''),
+                'clean_body': parsed_email.get('clean_body', ''),
+                'quality_score': parsed_email.get('quality_score', 0),
+                'marketing_score': parsed_email.get('marketing_score', 0),
+                'content_ratio': parsed_email.get('content_ratio', 0),
+                'language_confidence': parsed_email.get('language_confidence', 0)
             }
             
             # Sanitize email data before adding to results
