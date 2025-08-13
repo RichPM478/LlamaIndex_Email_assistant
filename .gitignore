@@ -38,10 +38,10 @@ env/
 .env.local
 .env.production
 
-# Data and logs
-data/raw/
-data/sync_state.json
-data/test_index*/
+# Data and logs - NEVER commit personal data!
+data/
+*.json.enc
+*.pkl
 logs/
 *.log
 
@@ -79,6 +79,3 @@ desktop.ini
 *.backup
 *.cache
 .cache/
-.env
-data/index/
-data/enhanced_index/
