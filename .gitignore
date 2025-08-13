@@ -19,15 +19,12 @@ wheels/
 *.egg-info/
 .installed.cfg
 *.egg
-MANIFEST
 
 # Virtual Environment
+.venv/
 venv/
 ENV/
 env/
-.venv/
-.ENV/
-.env/
 
 # IDE
 .vscode/
@@ -35,110 +32,50 @@ env/
 *.swp
 *.swo
 *~
-.DS_Store
-.project
-.pydevproject
-.settings/
-*.sublime-project
-*.sublime-workspace
 
-# Environment Variables - CRITICAL
+# Environment variables
 .env
 .env.local
-.env.*.local
-*.env
-!.env.example
+.env.production
 
-# Data Folders - NEVER COMMIT
+# Data and logs - NEVER commit personal data!
 data/
-data/raw/
-data/index/
-data/processed/
-data/cache/
-data/events.ics
-*.json
-*.jsonl
-*.csv
-*.xlsx
-*.ics
-
-# Logs
+*.json.enc
+*.pkl
 logs/
 *.log
-log.txt
 
-# LlamaIndex
-storage/
-storage_*
-persist/
-*.pkl
-*.index
-*.faiss
+# Test files
+test_*.py
+debug_*.py
+check_*.py
+fetch_*.py
+verify_*.py
+fix_*.py
+final_test_*.py
+*_test.py
+benchmark*.py
+profile*.py
 
-# Ollama
-.ollama/
-ollama_cache/
+# Development docs
+*_EVALUATION.md
+*_SUMMARY.md
+*_RESULTS.md
+*_PLAN.md
+*_INTEGRATION.md
+MIGRATION*.md
+IMPROVEMENTS.md
+OPTIMIZATION*.md
+PHASE*.md
 
-# Streamlit
-.streamlit/
-*.streamlit
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
 
-# Testing
-.coverage
-.pytest_cache/
-.tox/
-htmlcov/
-*.cover
-.hypothesis/
-
-# Documentation builds
-docs/_build/
-docs/.doctrees/
-
-# Jupyter
-.ipynb_checkpoints
-*.ipynb
-
-# Database
-*.db
-*.sqlite
-*.sqlite3
-
-# Backup files
+# Temporary files
+*.tmp
 *.bak
 *.backup
-*.tmp
-*.temp
-
-# OS Files
-Thumbs.db
-Desktop.ini
-
-# Security - Additional patterns
-secrets/
-credentials/
-private/
-*.key
-*.pem
-*.cert
-*.crt
-*.pfx
-
-# Model files
-models/
-*.bin
-*.pt
-*.pth
-*.onnx
-*.h5
-*.safetensors
-
-# Cache
+*.cache
 .cache/
-__pycache__/
-*.pyc
-
-# Package managers
-node_modules/
-yarn.lock
-package-lock.json

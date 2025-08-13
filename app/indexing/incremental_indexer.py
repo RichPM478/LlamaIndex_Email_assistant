@@ -6,7 +6,7 @@ from datetime import datetime
 from typing import List, Dict, Any, Optional, Set
 from pathlib import Path
 from llama_index.core import VectorStoreIndex, StorageContext
-from llama_index.core.node_parser import SentenceSplitter
+from app.indexing.smart_chunker import SmartEmailChunker
 from llama_index.core.schema import TextNode
 import pickle
 
@@ -17,8 +17,14 @@ class IncrementalIndexer:
         self.persist_dir = persist_dir
         self.metadata_file = os.path.join(persist_dir, "indexing_metadata.json")
         self.processed_emails_file = os.path.join(persist_dir, "processed_emails.pkl")
-        self.chunk_size = 512
-        self.chunk_overlap = 50
+        # Use optimized smart chunker for high-quality embeddings
+        self.chunker = SmartEmailChunker(
+            min_chunk_size=50,
+            max_chunk_size=384,
+            overlap_size=30,
+            preserve_paragraphs=True,
+            preserve_sentences=True
+        )
         
         # Load existing metadata
         self.metadata = self._load_metadata()
@@ -151,7 +157,8 @@ class IncrementalIndexer:
         from app.config.settings import get_settings
         from app.llm.provider import configure_llm
         from app.embeddings.provider import configure_embeddings
-        from app.indexing.build_index import _resolve_latest_raw, _normalize_sender
+        from app.indexing.build_index import _resolve_latest_raw
+        from app.ingest.mailparser_adapter import MailParserAdapter
         
         # Configure LLM and embeddings
         settings = get_settings()
@@ -182,33 +189,36 @@ class IncrementalIndexer:
                 print(f"Warning: Could not load existing index: {e}")
             return None
         
-        # Process new emails into nodes
-        splitter = SentenceSplitter(chunk_size=self.chunk_size, chunk_overlap=self.chunk_overlap)
+        # Process new emails into nodes using smart chunking
+        parser = MailParserAdapter()
         new_nodes: List[TextNode] = []
         unique_senders = set()
         
         for i, email in enumerate(new_emails):
-            text = (email.get("body_text") or email.get("body") or "").strip()
-            if not text:
+            # Parse email with quality analysis
+            parsed = parser.parse_email_advanced(email)
+            
+            if len(parsed['clean_body'].strip()) < 20:
                 continue
             
-            # Normalize sender
-            sender = email.get("from_") or email.get("from") or "unknown"
-            sender_normalized = _normalize_sender(sender)
+            sender_normalized = parsed['clean_sender'].lower()
             unique_senders.add(sender_normalized)
             
-            # Enhanced metadata
+            # Enhanced metadata with quality scores
             meta = {
                 "message_id": email.get("message_id"),
                 "uid": email.get("uid"),
-                "subject": email.get("subject") or "No subject",
-                "from": sender,
+                "subject": parsed['clean_subject'],
+                "from": parsed['clean_sender'],
                 "from_normalized": sender_normalized,
                 "date": email.get("date"),
                 "sent_at": email.get("sent_at"),
                 "folder": email.get("folder"),
                 "email_index": self.metadata["total_emails_indexed"] + i,
-                "indexed_at": datetime.now().isoformat()
+                "indexed_at": datetime.now().isoformat(),
+                "quality_score": parsed['quality_score'],
+                "marketing_score": parsed['marketing_score'],
+                "language_confidence": parsed['language_confidence']
             }
             
             # Add intelligence analysis if available
@@ -225,19 +235,24 @@ class IncrementalIndexer:
             except Exception as e:
                 print(f"Warning: Could not analyze email intelligence: {e}")
             
-            # Create enhanced text with metadata
-            enhanced_text = f"From: {sender}\nSubject: {email.get('subject', 'No subject')}\n\n{text}"
+            # Create enhanced text
+            enhanced_text = f"From: {parsed['clean_sender']}\nSubject: {parsed['clean_subject']}\n\n{parsed['clean_body']}"
             
-            # Split into chunks
-            chunks = splitter.split_text(enhanced_text)
-            if not chunks and text:
-                chunks = [enhanced_text]
+            # Smart chunking with context preservation
+            content_dict = {
+                'main_content': parsed['clean_body'],
+                'cleaned_full_text': enhanced_text
+            }
             
-            for chunk_idx, chunk in enumerate(chunks):
+            email_chunks = self.chunker.chunk_email(content_dict, meta)
+            
+            for chunk in email_chunks:
                 node_meta = meta.copy()
-                node_meta["chunk_index"] = chunk_idx
-                node_meta["total_chunks"] = len(chunks)
-                new_nodes.append(TextNode(text=chunk, metadata=node_meta))
+                node_meta["chunk_index"] = chunk.chunk_index
+                node_meta["total_chunks"] = chunk.total_chunks
+                node_meta["chunk_type"] = chunk.chunk_type
+                node_meta["token_count"] = chunk.token_count
+                new_nodes.append(TextNode(text=chunk.text, metadata=node_meta))
             
             # Mark email as processed
             email_hash = self._get_email_hash(email)

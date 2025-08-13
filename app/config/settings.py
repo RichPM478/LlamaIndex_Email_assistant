@@ -95,7 +95,10 @@ class Settings(BaseSettings):
 
     # ---------- Embeddings ----------
     embeddings_provider: str = Field("local_hf", env="EMBEDDINGS_PROVIDER")  # local_hf | openai
-    embedding_model: str = Field("sentence-transformers/all-MiniLM-L6-v2", env="EMBEDDING_MODEL")
+    # Using mixedbread-ai/mxbai-embed-large-v1 - Top benchmark scores
+    # 1024 dimensions, 512 token context, optimized for semantic search
+    # Perfect for RTX 4070 GPU with excellent retrieval performance
+    embedding_model: str = Field("mixedbread-ai/mxbai-embed-large-v1", env="EMBEDDING_MODEL")
     openai_embedding_model: str = Field("text-embedding-3-small", env="OPENAI_EMBEDDING_MODEL")
 
     # ---------- IMAP ----------

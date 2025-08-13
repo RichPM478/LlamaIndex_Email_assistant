@@ -8,6 +8,9 @@ llama-index-llms-anthropic
 llama-index-embeddings-huggingface
 llama-index-embeddings-openai
 sentence-transformers
+# Hybrid search and reranking
+llama-index-retrievers-bm25>=0.1.0
+rank-bm25>=0.2.2
 # Utils
 bs4
 beautifulsoup4
@@ -20,3 +23,9 @@ ics
 streamlit
 # Security
 cryptography>=3.4.8
+
+# Enhanced Pipeline Dependencies
+chardet>=5.0.0  # Better encoding detection
+langdetect>=1.0.9  # Language detection
+tiktoken>=0.5.0  # Token counting for GPT models
+mailparser>=4.1.0  # Advanced email parsing

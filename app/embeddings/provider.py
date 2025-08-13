@@ -35,9 +35,12 @@ def configure_embeddings(settings=None):
                 device=device,  # Pass the device directly
                 trust_remote_code=True,
                 cache_folder=None,
-                embed_batch_size=32 if device == "cuda" else 10,  # Larger batch for GPU
+                embed_batch_size=64 if device == "cuda" else 10,  # Optimized for RTX 4070
             )
             print(f"[SUCCESS] Configured embeddings: {settings.embedding_model} on {device.upper()}")
+            print(f"   Model dimensions: 1024 (high-quality dense embeddings)")
+            print(f"   Context window: 512 tokens")
+            print(f"   Batch size: {64 if device == 'cuda' else 10}")
             
         except Exception as e:
             print(f"[WARNING] Failed to load model on {device}: {e}")
