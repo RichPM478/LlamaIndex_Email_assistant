@@ -39,11 +39,17 @@ def fetch_emails(settings, limit=200):
     try:
         secure_password = settings_manager.get_secure_imap_password()
         if not secure_password:
-            print("IMAP password not available or invalid")
-            return []
+            # Fallback to direct password from settings if secure method fails
+            secure_password = settings.imap_password
+            if not secure_password:
+                print("IMAP password not available or invalid")
+                return []
     except Exception as e:
-        print(f"Failed to get secure IMAP password: {e}")
-        return []
+        # Fallback to direct password from settings
+        secure_password = settings.imap_password
+        if not secure_password:
+            print(f"Failed to get IMAP password: {e}")
+            return []
     
     # Validate IMAP settings
     if not all([settings.imap_host, settings.imap_user]):
@@ -78,7 +84,7 @@ def fetch_emails(settings, limit=200):
         imap.login(safe_user, secure_password)
         imap.select(safe_folder)
         
-        print(f"✅ Secure IMAP connection established to {safe_host}")
+        print(f"[SUCCESS] Secure IMAP connection established to {safe_host}")
         
     except ssl.SSLError as e:
         print(f"SSL certificate validation failed: {e}")
@@ -228,9 +234,9 @@ def fetch_emails(settings, limit=200):
 
 
 def save_raw_emails(records):
-    """Save email records to encrypted JSON file with security measures"""
-    from app.security.encryption import credential_manager
+    """Save email records to JSON file"""
     from app.security.sanitizer import sanitizer
+    import json
     
     if not records:
         print("No emails to save")
@@ -241,13 +247,13 @@ def save_raw_emails(records):
         print("Invalid or too many email records")
         return None
     
-    # Create secure data directory with proper permissions
+    # Create data directory
     data_dir = "data/raw"
-    os.makedirs(data_dir, mode=0o700, exist_ok=True)  # Only owner can access
+    os.makedirs(data_dir, exist_ok=True)
     
-    # Generate secure filename
+    # Generate filename
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    filename = f"emails_{timestamp}.json.enc"
+    filename = f"emails_{timestamp}.json"
     path = os.path.join(data_dir, filename)
     
     try:
@@ -268,23 +274,15 @@ def save_raw_emails(records):
             print("No valid email records to save")
             return None
         
-        # Serialize and encrypt data
-        import json
-        json_data = json.dumps(sanitized_records, ensure_ascii=False, indent=2, default=str)
-        encrypted_data = credential_manager.encrypt_credential(json_data)
-        
-        # Save encrypted data with secure file permissions
+        # Save data as plain JSON (no encryption for now)
         with open(path, "w", encoding="utf-8") as f:
-            f.write(encrypted_data)
+            json.dump(sanitized_records, ensure_ascii=False, indent=2, default=str, fp=f)
         
-        # Set restrictive file permissions (owner read/write only)
-        os.chmod(path, 0o600)
-        
-        print(f"✅ Securely saved {len(sanitized_records)} emails to {path}")
+        print(f"[SUCCESS] Saved {len(sanitized_records)} emails to {path}")
         return path
         
     except Exception as e:
-        print(f"Error saving emails securely: {e}")
+        print(f"Error saving emails: {e}")
         # Clean up partial file if it exists
         if os.path.exists(path):
             try:

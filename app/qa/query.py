@@ -25,9 +25,19 @@ class LazyEmailQueryEngine:
     Heavy imports are deferred until first actual query.
     """
     
-    def __init__(self, strategy: QueryStrategy = QueryStrategy.OPTIMIZED, persist_dir: str = "data/index", use_hybrid: bool = True):
+    def __init__(self, strategy: QueryStrategy = QueryStrategy.OPTIMIZED, persist_dir: str = None, use_hybrid: bool = True):
         self.strategy = strategy
-        self.persist_dir = persist_dir
+        
+        # Resolve absolute path for index directory
+        if persist_dir is None:
+            from pathlib import Path
+            # Get the project root (where data/ folder is located)
+            current_file = Path(__file__).resolve()  # app/qa/query.py
+            project_root = current_file.parent.parent.parent  # Go up 3 levels to project root
+            self.persist_dir = str(project_root / "data" / "index")
+        else:
+            self.persist_dir = persist_dir
+            
         self.use_hybrid = use_hybrid
         
         # Lazy-loaded components (None until needed)
@@ -102,12 +112,25 @@ class LazyEmailQueryEngine:
             start = time.time()
             
             self._ensure_imports()
-            storage_context = StorageContext.from_defaults(persist_dir=self.persist_dir)
-            self._index = load_index_from_storage(storage_context)
-            self._last_loaded = time.time()
             
-            elapsed = time.time() - start
-            print(f"[LAZY] Index loaded in {elapsed*1000:.1f}ms")
+            # Check if index exists
+            import os
+            if not os.path.exists(self.persist_dir):
+                print(f"[WARNING] Index directory not found: {self.persist_dir}")
+                print("[INFO] Index needs to be built. Please run the indexing process first.")
+                return None
+            
+            try:
+                storage_context = StorageContext.from_defaults(persist_dir=self.persist_dir)
+                self._index = load_index_from_storage(storage_context)
+                self._last_loaded = time.time()
+                
+                elapsed = time.time() - start
+                print(f"[LAZY] Index loaded in {elapsed*1000:.1f}ms")
+            except Exception as e:
+                print(f"[ERROR] Failed to load index: {e}")
+                print("[INFO] Index may be corrupted or incompatible. Please rebuild the index.")
+                return None
         
         return self._index
     
@@ -148,6 +171,16 @@ class LazyEmailQueryEngine:
         # Lazy load everything
         self._ensure_models()
         index = self._ensure_index()
+        
+        # Handle case where index is not available
+        if index is None:
+            return {
+                "answer": "Sorry, the email index is not available. Please build the index first by running the indexing process or using the 'Rebuild Index' button in the UI.",
+                "confidence": 0.0,
+                "citations": [],
+                "query_time": time.time() - total_start,
+                "metadata": {"error": "Index not available", "suggestion": "Run indexing process"}
+            }
         
         # Check for sender filtering
         target_sender = self._extract_sender_from_query(question)
@@ -243,6 +276,7 @@ class LazyEmailQueryEngine:
             "answer": formatted_answer,
             "raw_answer": raw_answer,  # Keep raw for compatibility
             "citations": citations,
+            "confidence": 0.8 if citations else 0.5,  # Simple confidence based on citations
             "metadata": {
                 "total_time": total_time,
                 "query_time": query_time,
@@ -288,11 +322,14 @@ def get_engine(strategy: str = "optimized") -> LazyEmailQueryEngine:
         _global_engine = LazyEmailQueryEngine(strategy=QueryStrategy.OPTIMIZED)
     return _global_engine
 
-# Convenience functions for backward compatibility  
-def lazy_optimized_ask(question: str, **kwargs) -> Dict[str, Any]:
-    """Fast lazy-loading optimized query"""
+# Main query function
+def ask(question: str, **kwargs) -> Dict[str, Any]:
+    """Process a question and return formatted answer with citations"""
     engine = get_engine("optimized")
     return engine.query(question, **kwargs)
+
+# Backward compatibility alias (to be removed later)
+lazy_optimized_ask = ask
 
 def get_cache_status() -> Dict[str, Any]:
     """Get cache status from global engine"""

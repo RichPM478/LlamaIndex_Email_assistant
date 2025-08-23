@@ -8,7 +8,8 @@
       "Bash(rm:*)",
       "Bash(timeout 60 python:*)",
       "Bash(find:*)",
-      "Bash(git restore:*)"
+      "Bash(git restore:*)",
+      "Bash(mkdir:*)"
     ],
     "deny": []
   }

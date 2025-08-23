@@ -139,6 +139,9 @@ def build_index(raw_path: Optional[str] = None,
         content_ratio = parsed_email['content_ratio']
         language_confidence = parsed_email['language_confidence']
         clean_body = parsed_email['clean_body']
+        has_attachments = parsed_email.get('has_attachments', False)
+        has_document_attachments = parsed_email.get('has_document_attachments', False)
+        attachments = parsed_email.get('attachments', [])
         
         quality_scores.append(quality_score)
         
@@ -171,6 +174,13 @@ def build_index(raw_path: Optional[str] = None,
             "processed_length": len(clean_body),
             "original_length": len(raw_email.get('body', '')),
             
+            # Attachment metadata (DOCLING)
+            "has_attachments": has_attachments,
+            "has_document_attachments": has_document_attachments,
+            "attachment_count": len(attachments),
+            "attachment_word_count": parsed_email.get('attachment_word_count', 0),
+            "attachment_types": list(set(att.get('content_type', '') for att in attachments)) if attachments else [],
+            
             # Quality classification
             "quality_tier": "high" if quality_score >= 80 else "medium" if quality_score >= 60 else "low",
             "is_marketing": marketing_score > 30,
@@ -180,10 +190,23 @@ def build_index(raw_path: Optional[str] = None,
         # Create enhanced text with metadata for better semantic matching
         enhanced_text = f"From: {parsed_email['clean_sender']}\nSubject: {parsed_email['clean_subject']}\n\n{clean_body}"
         
+        # Add attachment content if available
+        attachment_text = ""
+        for att in attachments:
+            if att.get('extracted_content'):
+                content = att['extracted_content']
+                if content.get('text'):
+                    attachment_text += f"\n\n--- Attachment: {att['filename']} ---\n"
+                    attachment_text += content['text']  # Already limited to 5000 chars in mailparser
+        
+        if attachment_text:
+            enhanced_text += attachment_text
+        
         # Smart chunking with context awareness
         content_dict = {
             'main_content': clean_body,
-            'cleaned_full_text': enhanced_text
+            'cleaned_full_text': enhanced_text,
+            'attachment_content': attachment_text if attachment_text else None
         }
         email_chunks = chunker.chunk_email(content_dict, meta)
         

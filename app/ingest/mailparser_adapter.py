@@ -109,6 +109,18 @@ class MailParserAdapter:
             attachments = self._extract_attachments(mail)
             headers = self._extract_headers(mail)
             
+            # Step 7: Combine attachment content for enhanced analysis
+            attachment_text = self._combine_attachment_text(attachments)
+            combined_content = clean_body + "\n\n" + attachment_text if attachment_text else clean_body
+            
+            # Step 8: Recalculate quality and importance with attachment content
+            if attachment_text:
+                enhanced_quality = self._assess_content_quality(combined_content, clean_subject, clean_sender, is_english, language_detected)
+                enhanced_importance = self._calculate_importance_score(clean_sender, clean_subject, combined_content, enhanced_quality, has_attachments=True)
+            else:
+                enhanced_quality = quality
+                enhanced_importance = importance_score
+            
             return {
                 # Cleaned content (mail-parser handles all encoding automatically)
                 'clean_sender': clean_sender,
@@ -122,16 +134,16 @@ class MailParserAdapter:
                 'date': email_data.get('date', ''),
                 
                 # Quality metrics (maintain compatibility)
-                'quality_score': quality.overall_score,
-                'marketing_score': quality.marketing_score,
-                'template_score': quality.template_score,
-                'readability_score': quality.readability_score,
-                'content_ratio': quality.content_ratio,
-                'language_confidence': quality.language_confidence,
-                'quality_issues': quality.issues,
+                'quality_score': enhanced_quality.overall_score,
+                'marketing_score': enhanced_quality.marketing_score,
+                'template_score': enhanced_quality.template_score,
+                'readability_score': enhanced_quality.readability_score,
+                'content_ratio': enhanced_quality.content_ratio,
+                'language_confidence': enhanced_quality.language_confidence,
+                'quality_issues': enhanced_quality.issues,
                 
                 # Derived metrics
-                'importance_score': importance_score,
+                'importance_score': enhanced_importance,
                 'email_type': email_type,
                 'content_length': len(clean_body),
                 
@@ -139,6 +151,9 @@ class MailParserAdapter:
                 'attachments': attachments,
                 'headers': headers,
                 'has_attachments': len(attachments) > 0,
+                'has_document_attachments': any(att.get('extracted_content') for att in attachments),
+                'attachment_word_count': sum(att.get('extracted_content', {}).get('word_count', 0) for att in attachments if att.get('extracted_content')),
+                'total_content_length': len(combined_content),
                 
                 # Language detection metadata
                 'is_english': is_english,
@@ -381,17 +396,55 @@ Content-Type: text/html; charset=UTF-8
         return text.strip()
     
     def _extract_attachments(self, mail) -> List[Dict[str, Any]]:
-        """Extract attachment information"""
+        """Extract attachment information and process content with Docling"""
+        from app.ingest.docling_processor import docling_processor
+        
         attachments = []
         try:
             if hasattr(mail, 'attachments') and mail.attachments:
                 for attachment in mail.attachments:
+                    filename = getattr(attachment, 'filename', 'unknown')
+                    content_type = getattr(attachment, 'content_type', 'unknown')
+                    payload = getattr(attachment, 'payload', b'')
+                    
+                    # Basic attachment info
                     att_info = {
-                        'filename': getattr(attachment, 'filename', 'unknown'),
-                        'content_type': getattr(attachment, 'content_type', 'unknown'),
-                        'size': len(getattr(attachment, 'payload', b'')),
-                        'content_id': getattr(attachment, 'content_id', None)
+                        'filename': filename,
+                        'content_type': content_type,
+                        'size': len(payload),
+                        'content_id': getattr(attachment, 'content_id', None),
+                        'extracted_content': None,
+                        'extraction_error': None
                     }
+                    
+                    # Process with Docling if it's a document
+                    if payload and len(payload) > 0:
+                        try:
+                            processed_doc = docling_processor.process_attachment(
+                                attachment_data=payload,
+                                filename=filename,
+                                content_type=content_type
+                            )
+                            
+                            # Add extracted content if successful
+                            if not processed_doc.error and processed_doc.text:
+                                att_info['extracted_content'] = {
+                                    'text': processed_doc.text[:5000],  # Limit for storage
+                                    'full_text': processed_doc.text,
+                                    'tables': processed_doc.tables,
+                                    'metadata': processed_doc.metadata,
+                                    'word_count': processed_doc.word_count,
+                                    'page_count': processed_doc.page_count,
+                                    'language': processed_doc.language,
+                                    'extraction_method': processed_doc.extraction_method
+                                }
+                            elif processed_doc.error:
+                                att_info['extraction_error'] = processed_doc.error
+                                
+                        except Exception as e:
+                            att_info['extraction_error'] = str(e)
+                            print(f"Docling processing error for {filename}: {e}")
+                    
                     attachments.append(att_info)
         except Exception as e:
             print(f"Attachment extraction error: {e}")
@@ -487,7 +540,20 @@ Content-Type: text/html; charset=UTF-8
             issues=issues
         )
     
-    def _calculate_importance_score(self, sender: str, subject: str, body: str, quality: ContentQualityScore) -> float:
+    def _combine_attachment_text(self, attachments: List[Dict[str, Any]]) -> str:
+        """Combine text from all processed attachments"""
+        combined_text = ""
+        
+        for att in attachments:
+            if att.get('extracted_content'):
+                content = att['extracted_content']
+                if content.get('full_text'):
+                    combined_text += f"\n\n--- Attachment: {att['filename']} ---\n"
+                    combined_text += content['full_text'][:10000]  # Limit per attachment
+        
+        return combined_text.strip()
+    
+    def _calculate_importance_score(self, sender: str, subject: str, body: str, quality: ContentQualityScore, has_attachments: bool = False) -> float:
         """Calculate email importance score"""
         base_score = 50.0
         
@@ -503,6 +569,10 @@ Content-Type: text/html; charset=UTF-8
         # Length bonus for reasonable emails
         if 100 < len(body) < 2000:
             base_score += 10
+        
+        # Attachment bonus for document attachments
+        if has_attachments:
+            base_score += 15  # Documents often indicate important content
         
         return max(0, min(100, base_score))
     

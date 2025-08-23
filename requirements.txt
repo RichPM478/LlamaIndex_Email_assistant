@@ -4,6 +4,16 @@ llama-index-llms-ollama
 llama-index-llms-openai
 llama-index-llms-azure-openai
 llama-index-llms-anthropic
+google-generativeai>=0.8.0  # Google Gemini 2.5 support
+
+# Evaluation Framework
+ragas>=0.3.0  # RAG evaluation metrics
+langchain>=0.3.0  # Required for RAGAS
+langchain-community  # Community integrations
+langchain-openai  # OpenAI integration for evaluation
+datasets>=4.0.0  # Dataset handling
+schedule>=1.2.0  # Automated evaluation scheduling
+
 # Embeddings
 llama-index-embeddings-huggingface
 llama-index-embeddings-openai
@@ -29,3 +39,9 @@ chardet>=5.0.0  # Better encoding detection
 langdetect>=1.0.9  # Language detection
 tiktoken>=0.5.0  # Token counting for GPT models
 mailparser>=4.1.0  # Advanced email parsing
+
+# Document Processing
+docling>=2.0.0  # Advanced document extraction from PDFs, Word, Excel, etc.
+docling-core>=2.0.0  # Core document processing components
+pypdfium2>=4.0.0  # PDF rendering support for Docling
+python-magic-bin>=0.4.14  # File type detection (Windows compatible)

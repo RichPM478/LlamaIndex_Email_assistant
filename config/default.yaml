@@ -1,0 +1,245 @@
+# Default configuration for Email Intelligence System
+app:
+  name: "Email Intelligence System"
+  version: "2.0.0"
+  environment: "development"
+  debug: true
+
+# Model Provider Configuration
+providers:
+  models:
+    default: "gemini"  # Default to Gemini 2.5
+    available:
+      - type: "gemini"
+        enabled: true
+        class: "src.infrastructure.adapters.model_providers.gemini_adapter.GeminiModelProvider"
+        config:
+          api_key: "AIzaSyB8OdIrzUdNfIJm7r4UCrEx2ZOmBDdjiLM"  # Will be overridden by env var
+          model_name: "gemini-2.0-flash-exp"
+          temperature: 0.7
+          max_tokens: 2000
+          extra_params:
+            top_p: 0.95
+            top_k: 40
+      
+      - type: "openai"
+        enabled: true
+        class: "src.infrastructure.adapters.model_providers.openai_adapter.OpenAIModelProvider"
+        config:
+          api_key: "${OPENAI_API_KEY}"
+          model_name: "gpt-4-turbo-preview"
+          temperature: 0.7
+          max_tokens: 2000
+      
+      - type: "ollama"
+        enabled: true
+        class: "src.infrastructure.adapters.model_providers.ollama_adapter.OllamaModelProvider"
+        config:
+          endpoint: "http://localhost:11434"
+          model_name: "llama3"
+          temperature: 0.7
+          max_tokens: 2000
+      
+      - type: "anthropic"
+        enabled: false
+        class: "src.infrastructure.adapters.model_providers.anthropic_adapter.AnthropicModelProvider"
+        config:
+          api_key: "${ANTHROPIC_API_KEY}"
+          model_name: "claude-3-opus-20240229"
+          temperature: 0.7
+          max_tokens: 2000
+
+  embeddings:
+    default: "sentence-transformers"
+    available:
+      - type: "gemini"
+        enabled: true
+        class: "src.infrastructure.adapters.model_providers.gemini_adapter.GeminiEmbeddingProvider"
+        config:
+          api_key: "AIzaSyB8OdIrzUdNfIJm7r4UCrEx2ZOmBDdjiLM"
+          model_name: "text-embedding-004"
+      
+      - type: "openai"
+        enabled: true
+        class: "src.infrastructure.adapters.model_providers.openai_adapter.OpenAIEmbeddingProvider"
+        config:
+          api_key: "${OPENAI_API_KEY}"
+          model_name: "text-embedding-3-small"
+      
+      - type: "sentence-transformers"
+        enabled: true
+        class: "src.infrastructure.adapters.model_providers.local_embedding_adapter.LocalEmbeddingProvider"
+        config:
+          model_name: "mixedbread-ai/mxbai-embed-large-v1"
+          device: "cuda"  # or "cpu"
+
+  vector_stores:
+    default: "chroma"
+    available:
+      - type: "chroma"
+        enabled: true
+        class: "src.infrastructure.adapters.vector_stores.chroma_adapter.ChromaVectorStore"
+        config:
+          persist_directory: "./chroma_db"
+          collection_name: "emails"
+      
+      - type: "qdrant"
+        enabled: false
+        class: "src.infrastructure.adapters.vector_stores.qdrant_adapter.QdrantVectorStore"
+        config:
+          url: "http://localhost:6333"
+          collection_name: "emails"
+      
+      - type: "faiss"
+        enabled: true
+        class: "src.infrastructure.adapters.vector_stores.faiss_adapter.FaissVectorStore"
+        config:
+          index_path: "./faiss_index"
+
+# Data Source Configuration
+data_sources:
+  email:
+    default: "imap"
+    available:
+      - type: "imap"
+        enabled: true
+        class: "src.infrastructure.adapters.data_sources.imap_adapter.IMAPDataSource"
+        config:
+          host: "${IMAP_HOST}"
+          port: 993
+          username: "${IMAP_USERNAME}"
+          password: "${IMAP_PASSWORD}"
+          use_ssl: true
+      
+      - type: "gmail"
+        enabled: false
+        class: "src.infrastructure.adapters.data_sources.gmail_adapter.GmailDataSource"
+        config:
+          credentials_path: "./credentials/gmail_credentials.json"
+      
+      - type: "filesystem"
+        enabled: true
+        class: "src.infrastructure.adapters.data_sources.filesystem_adapter.FilesystemDataSource"
+        config:
+          root_directory: "./email_data"
+
+# Processing Configuration
+processing:
+  chunking:
+    strategy: "smart"  # "smart", "fixed", "semantic"
+    max_chunk_size: 512
+    chunk_overlap: 50
+    min_chunk_size: 100
+  
+  quality:
+    enabled: true
+    min_quality_score: 40.0
+    max_marketing_score: 50.0
+    check_authenticity: true
+  
+  batch:
+    size: 100
+    parallel_workers: 4
+    timeout: 300  # seconds
+
+# Retrieval Configuration
+retrieval:
+  strategy: "hybrid"  # "vector", "keyword", "hybrid"
+  top_k: 10
+  rerank:
+    enabled: true
+    model: "cross-encoder/ms-marco-MiniLM-L-6-v2"
+    top_k: 5
+  
+  hybrid:
+    vector_weight: 0.7
+    keyword_weight: 0.3
+
+# Caching Configuration
+cache:
+  enabled: true
+  type: "redis"  # "redis", "memory", "disk"
+  ttl: 3600  # seconds
+  max_size: 1000  # max items
+  redis:
+    host: "localhost"
+    port: 6379
+    db: 0
+
+# Security Configuration
+security:
+  encryption:
+    enabled: true
+    algorithm: "AES-256-GCM"
+    key_derivation: "PBKDF2"
+  
+  authentication:
+    enabled: true
+    session_timeout: 3600  # seconds
+    max_attempts: 3
+  
+  sanitization:
+    enabled: true
+    remove_scripts: true
+    remove_styles: true
+
+# Monitoring & Analytics
+monitoring:
+  enabled: true
+  
+  metrics:
+    enabled: true
+    provider: "prometheus"
+    endpoint: "http://localhost:9090"
+    export_interval: 60  # seconds
+  
+  tracing:
+    enabled: false
+    provider: "jaeger"
+    endpoint: "http://localhost:14268"
+    sample_rate: 0.1
+  
+  logging:
+    level: "INFO"  # DEBUG, INFO, WARNING, ERROR
+    format: "json"
+    file: "./logs/app.log"
+    max_size: "100MB"
+    max_files: 10
+
+# Performance Tuning
+performance:
+  lazy_loading: true
+  preload_models: false
+  gpu:
+    enabled: true
+    device: "cuda:0"
+    memory_fraction: 0.8
+
+# UI Configuration
+ui:
+  streamlit:
+    theme: "dark"
+    wide_mode: true
+    show_footer: false
+  
+  api:
+    enabled: true
+    host: "0.0.0.0"
+    port: 8000
+    cors_origins: ["*"]
+
+# MCP Server Configuration
+mcp:
+  enabled: true
+  host: "localhost"
+  port: 8080
+  tools:
+    - "email_search"
+    - "email_summarize"
+    - "email_analyze"
+
+# Plugin Configuration
+plugins:
+  enabled: true
+  directory: "./plugins"
+  auto_load: true

@@ -79,6 +79,11 @@ Check your provider's IMAP settings and update the `.env` accordingly.
 
 ## 🎮 Usage
 
+### Starting the Application
+```bash
+python run_ui.py
+```
+
 ### Basic Queries
 - "Summarize today's emails"
 - "Show me all Amazon orders"
