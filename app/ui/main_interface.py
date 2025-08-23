@@ -74,8 +74,90 @@ def setup_providers():
     llm_provider.configure_llm = lambda settings=None: get_llm(st.session_state.current_provider)
     embed_provider.configure_embeddings = lambda settings=None: get_embed_model(st.session_state.current_embedding_provider)
 
+def render_email_update_progress():
+    """Render the email update progress UI"""
+    import asyncio
+    from app.sync.email_updater import get_email_updater
+    
+    st.markdown("## 📧 Updating Your Emails")
+    
+    # Create progress containers
+    progress_bar = st.progress(0)
+    status_text = st.empty()
+    details_container = st.container()
+    
+    # Initialize updater
+    updater = get_email_updater()
+    
+    # Progress callback
+    progress_data = {"message": "", "percentage": 0, "error": False}
+    
+    def update_progress(data):
+        progress_data.update(data)
+        progress_bar.progress(data["percentage"] / 100)
+        
+        if data.get("error"):
+            status_text.error(f"❌ {data['message']}")
+        else:
+            status_text.info(f"⏳ {data['message']}")
+    
+    # Run the update
+    try:
+        # Run async update in sync context
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        result = loop.run_until_complete(updater.update_emails(update_progress))
+        
+        # Show results
+        if result["success"]:
+            status_text.success(f"✅ {result['message']}")
+            
+            with details_container:
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.metric("New Emails", result.get("new_emails", 0))
+                with col2:
+                    st.metric("Total Emails", result.get("total_emails", 0))
+                with col3:
+                    duration = result.get("duration", 0)
+                    st.metric("Time Taken", f"{duration:.1f}s")
+            
+            # Add success message to chat
+            if result.get("new_emails", 0) > 0:
+                st.balloons()
+                st.session_state.messages.append({
+                    "role": "assistant",
+                    "content": f"🎉 Successfully updated! Found {result['new_emails']} new emails. You can now ask me questions about them!"
+                })
+        else:
+            status_text.error(f"❌ {result.get('message', 'Update failed')}")
+            
+            # Show error details
+            if result.get("action_needed") == "configure_email":
+                st.error("Please configure your email settings in the System Configuration tab")
+            elif result.get("action_needed") == "retry":
+                if st.button("🔄 Retry Update"):
+                    st.rerun()
+    
+    except Exception as e:
+        status_text.error(f"❌ Update failed: {str(e)}")
+        st.error("An unexpected error occurred. Please check your settings and try again.")
+    
+    finally:
+        # Clear update flag
+        st.session_state.update_in_progress = False
+        
+        # Show continue button
+        if st.button("← Back to Chat", type="primary"):
+            st.rerun()
+
 def render_chat_interface():
     """Render the main chat interface."""
+    
+    # Handle email update if in progress
+    if st.session_state.get("update_in_progress", False):
+        render_email_update_progress()
+        return
     
     # Welcome message
     if not st.session_state.messages:
@@ -366,6 +448,38 @@ with tab3:
 # Sidebar for quick controls
 with st.sidebar:
     st.title("⚙️ Quick Controls")
+    
+    # Email Update Section - PROMINENT PLACEMENT
+    st.subheader("📧 Email Updates")
+    
+    from app.sync.email_updater import get_email_updater
+    updater = get_email_updater()
+    
+    # Get last update info
+    last_update_info = updater.get_last_update_info()
+    
+    # Update button with status
+    col1, col2 = st.columns([2, 1])
+    with col1:
+        if st.button("🔄 Update Emails", type="primary", use_container_width=True, key="update_sidebar"):
+            st.session_state.update_in_progress = True
+            st.rerun()
+    
+    with col2:
+        if last_update_info["status"] == "never":
+            st.caption("Never")
+        else:
+            st.caption(last_update_info["time_ago"])
+    
+    # Show email count
+    if last_update_info["email_count"] > 0:
+        st.metric("Total Emails", f"{last_update_info['email_count']:,}")
+    
+    # Show update recommendation
+    if updater.needs_update():
+        st.info("💡 Update recommended", icon="ℹ️")
+    
+    st.divider()
     
     # Provider selection
     st.subheader("🤖 AI Provider")

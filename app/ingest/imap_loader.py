@@ -26,8 +26,18 @@ def safe_decode_header(header_value):
         # If all else fails, return string representation
         return str(header_value) if header_value else ""
 
-def fetch_emails(settings, limit=200):
-    """Fetch emails from IMAP server with secure connection and error handling"""
+def fetch_emails(settings, limit=200, since_date=None):
+    """
+    Fetch emails from IMAP server with secure connection and error handling.
+    
+    Args:
+        settings: Application settings object
+        limit: Maximum number of emails to fetch (default 200)
+        since_date: Optional datetime to fetch emails since (for incremental updates)
+    
+    Returns:
+        List of email dictionaries with metadata and content
+    """
     from app.security.encryption import settings_manager
     from app.security.sanitizer import sanitizer
     
@@ -96,8 +106,30 @@ def fetch_emails(settings, limit=200):
         print(f"Failed to establish secure IMAP connection: {e}")
         return []
 
-    # Search for all emails
-    status, messages = imap.search(None, "ALL")
+    # Build search criteria based on date filter
+    if since_date:
+        # Format date for IMAP search (DD-Mon-YYYY format)
+        from datetime import datetime
+        if isinstance(since_date, datetime):
+            date_str = since_date.strftime("%d-%b-%Y")
+            search_criteria = f'(SINCE "{date_str}")'
+            print(f"[INFO] Fetching emails since {date_str}")
+        else:
+            search_criteria = "ALL"
+    else:
+        search_criteria = "ALL"
+    
+    # Search for emails based on criteria
+    try:
+        if search_criteria == "ALL":
+            status, messages = imap.search(None, "ALL")
+        else:
+            status, messages = imap.search(None, search_criteria)
+    except Exception as e:
+        print(f"Search failed with criteria '{search_criteria}': {e}")
+        # Fallback to ALL if date search fails
+        status, messages = imap.search(None, "ALL")
+    
     if status != "OK":
         print("Failed to search emails")
         return []

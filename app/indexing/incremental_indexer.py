@@ -344,5 +344,32 @@ class IncrementalIndexer:
         # Build fresh index
         return self.build_incremental_index(raw_path)
 
+    def add_emails(self, raw_file: str) -> Dict[str, Any]:
+        """
+        Simple method for EmailUpdater to add new emails to index.
+        
+        Args:
+            raw_file: Path to JSON file with new emails
+            
+        Returns:
+            Dict with results of the indexing operation
+        """
+        try:
+            # Process the new emails using existing incremental logic
+            result = self.update_index_incremental(raw_file)
+            
+            return {
+                "success": True,
+                "emails_processed": result.get('processed', 0),
+                "emails_skipped": result.get('skipped', 0),
+                "total_emails": result.get('total', 0)
+            }
+        except Exception as e:
+            return {
+                "success": False,
+                "error": str(e),
+                "emails_processed": 0
+            }
+
 # Global incremental indexer instance
 incremental_indexer = IncrementalIndexer()
