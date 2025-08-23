@@ -122,12 +122,13 @@ def fetch_emails(settings, limit=200):
             msg = email.message_from_bytes(msg_data[0][1])
             
             # Convert email message to dict format for parsing
+            # Decode headers properly using our safe decoder
             email_dict = {
-                'from': msg.get('From', ''),
-                'to': msg.get('To', ''),
-                'cc': msg.get('Cc', ''),
-                'subject': msg.get('Subject', ''),
-                'date': msg.get('Date', ''),
+                'from': safe_decode_header(msg.get('From', '')),
+                'to': safe_decode_header(msg.get('To', '')),
+                'cc': safe_decode_header(msg.get('Cc', '')),
+                'subject': safe_decode_header(msg.get('Subject', '')),
+                'date': msg.get('Date', ''),  # Date doesn't need decoding
                 'message_id': msg.get('Message-ID', ''),
                 'uid': mail_id.decode()
             }
@@ -169,10 +170,10 @@ def fetch_emails(settings, limit=200):
             parser = MailParserAdapter()
             parsed_email = parser.parse_email_advanced(email_dict)
             
-            # Apply filters using parsed data
-            sender_name = parsed_email.get('from_name', '')
-            sender_email = parsed_email.get('from_email', '')
-            subject = parsed_email.get('subject', '')
+            # Apply filters using parsed data - FIXED to use correct keys
+            sender_name = parsed_email.get('clean_sender', '')
+            sender_email = parsed_email.get('clean_sender', '')  # Parser returns full sender string
+            subject = parsed_email.get('clean_subject', '')
             
             if settings.filter_from:
                 sender_combined = f"{sender_name} {sender_email}".lower()
@@ -184,19 +185,19 @@ def fetch_emails(settings, limit=200):
             
             # Create email record using parsed data
             email_record = {
-                # Basic fields for backward compatibility
-                'from': parsed_email.get('from_email', ''),
-                'to': parsed_email.get('to_email', ''),
-                'subject': parsed_email.get('subject', ''),
-                'date': parsed_email.get('date', ''),
+                # Basic fields for backward compatibility - FIXED to use correct keys
+                'from': parsed_email.get('clean_sender', email_dict.get('from', '')),
+                'to': email_dict.get('to', ''),  # Parser doesn't extract 'to' field
+                'subject': parsed_email.get('clean_subject', email_dict.get('subject', '')),
+                'date': parsed_email.get('date', email_dict.get('date', '')),
                 'body': parsed_email.get('clean_body', ''),
-                'message_id': parsed_email.get('message_id', ''),
+                'message_id': email_dict.get('message_id', ''),
                 'uid': email_dict.get('uid', ''),
                 
-                # Enhanced fields
-                'from_name': parsed_email.get('from_name', ''),
-                'from_email': parsed_email.get('from_email', ''),
-                'to_email': parsed_email.get('to_email', ''),
+                # Enhanced fields - using actual parsed data
+                'from_name': parsed_email.get('clean_sender', ''),
+                'from_email': parsed_email.get('clean_sender', ''),
+                'to_email': email_dict.get('to', ''),
                 'clean_body': parsed_email.get('clean_body', ''),
                 'quality_score': parsed_email.get('quality_score', 0),
                 'marketing_score': parsed_email.get('marketing_score', 0),

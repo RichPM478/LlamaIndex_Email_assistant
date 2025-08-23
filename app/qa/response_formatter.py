@@ -197,13 +197,22 @@ class ResponseFormatter:
         formatted = "\n\n### 📚 Sources\n"
         
         for i, cite in enumerate(citations[:5], 1):  # Show top 5 sources
-            from_name = cite.get('from', 'Unknown Sender')
+            from_field = cite.get('from', 'Unknown Sender')
             subject = cite.get('subject', 'No Subject')
             date = cite.get('date', '')
             
-            # Clean up sender name
-            if '@' in from_name:
-                from_name = from_name.split('<')[0].strip()
+            # Clean up sender name - handle tuple format from parser
+            if isinstance(from_field, tuple) and len(from_field) >= 2:
+                # Format: (name, email)
+                from_name = from_field[0] if from_field[0] else from_field[1]
+            elif isinstance(from_field, str):
+                # Clean up sender name from string
+                if '@' in from_field:
+                    from_name = from_field.split('<')[0].strip()
+                else:
+                    from_name = from_field
+            else:
+                from_name = str(from_field)
             
             # Truncate long subjects
             if len(subject) > 60:
